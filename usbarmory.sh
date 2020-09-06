@@ -33,7 +33,7 @@ mirror=${mirror:-"http://http.kali.org/kali"}
 # Gitlab url Kali repository
 kaligit="https://gitlab.com/kalilinux"
 # Github raw url
-githubraw="$githubraw"
+githubraw="https://raw.githubusercontent.com"
 
 # Check EUID=0 you can run any binary as root.
 if [[ $EUID -ne 0 ]]; then
