@@ -1,9 +1,10 @@
 #!/bin/bash
+# This is the Raspberry Pi 2 v1.2/3/4 Kali ARM 64 bit build script - http://www.kali.org/downloads
+# A trusted Kali Linux image created by Offensive Security - http://www.offensive-security.com
 set -e
 
 # Uncomment to activate debug
 # debug=true
-
 if [ "$debug" = true ]; then
   exec > >(tee -a -i "${0%.*}.log") 2>&1
   set -x
@@ -12,7 +13,7 @@ fi
 # Architecture
 architecture=${architecture:-"arm64"}
 # Generate a random machine name to be used.
-machine=$(tr -cd 'A-Za-z0-9' < /dev/urandom | head -c16 ; echo)
+machine=$(dbus-uuidgen)
 # Custom hostname variable
 hostname=${2:-kali}
 # Custom image file name variable - MUST NOT include .img at the end.
@@ -100,16 +101,17 @@ elif [ "$apt_cacher" = "apt-cacher-ng" ] ; then
 fi
 
 # Detect architecture
-if [[ "${architecture}" == "arm64" ]]; then
-        qemu_bin="/usr/bin/qemu-aarch64-static"
-        lib_arch="aarch64-linux-gnu"
-elif [[ "${architecture}" == "armhf" ]]; then
-        qemu_bin="/usr/bin/qemu-arm-static"
-        lib_arch="arm-linux-gnueabihf"
-elif [[ "${architecture}" == "armel" ]]; then
-        qemu_bin="/usr/bin/qemu-arm-static"
-        lib_arch="arm-linux-gnueabi"
-fi
+case ${architecture} in
+  arm64)
+    qemu_bin="/usr/bin/qemu-aarch64-static"
+    lib_arch="aarch64-linux-gnu" ;;
+  armhf)
+    qemu_bin="/usr/bin/qemu-arm-static"
+    lib_arch="arm-linux-gnueabihf" ;;
+  armel)
+    qemu_bin="/usr/bin/qemu-arm-static"
+    lib_arch="arm-linux-gnueabi" ;;
+esac
 
 # create the rootfs - not much to modify here, except maybe throw in some more packages if you want.
 eatmydata debootstrap --foreign --keyring=/usr/share/keyrings/kali-archive-keyring.gpg --include=kali-archive-keyring,eatmydata \
@@ -117,7 +119,7 @@ eatmydata debootstrap --foreign --keyring=/usr/share/keyrings/kali-archive-keyri
 
 # systemd-nspawn enviroment
 systemd-nspawn_exec(){
-  LANG=C systemd-nspawn -q --bind-ro ${qemu_bin} -M ${machine} -D ${work_dir} "$@"
+  LANG=C systemd-nspawn -q --bind-ro ${qemu_bin} --capability=cap_setfcap --setenv=RUNLEVEL=1 -M ${machine} -D ${work_dir} "$@"
 }
 
 # We need to manually extract eatmydata to use it for the second stage.
@@ -180,9 +182,6 @@ auto eth0
 allow-hotplug eth0
 iface eth0 inet dhcp
 EOF
-
-# DNS server
-echo "nameserver 8.8.8.8" > ${work_dir}/etc/resolv.conf
 
 # Copy directory bsp into build dir.
 cp -rp bsp ${work_dir}
@@ -315,15 +314,14 @@ sed -i -e 's/FONTSIZE=.*/FONTSIZE="6x12"/' /etc/default/console-setup
 # Fix startup time from 5 minutes to 15 secs on raise interface wlan0
 sed -i 's/^TimeoutStartSec=5min/TimeoutStartSec=15/g' "/lib/systemd/system/networking.service"
 
+# Clean up dpkg.eatmydata
 rm -f /usr/bin/dpkg
+dpkg-divert --remove --rename /usr/bin/dpkg
 EOF
 
 # Run third stage
 chmod 755 ${work_dir}/third-stage
 systemd-nspawn_exec /third-stage
-
-# Clean up eatmydata
-systemd-nspawn_exec dpkg-divert --remove --rename /usr/bin/dpkg
 
 # Clean system
 systemd-nspawn_exec << 'EOF'
@@ -344,6 +342,9 @@ rm -rf /var/cache/debconf/*.data-old
 for logs in $(find /var/log -type f); do > $logs; done
 history -c
 EOF
+
+# Define DNS server after last running systemd-nspawn.
+echo "nameserver 8.8.8.8" > ${work_dir}/etc/resolv.conf
 
 # Disable the use of http proxy in case it is enabled.
 if [ -n "$proxy_url" ]; then

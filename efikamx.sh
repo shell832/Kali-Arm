@@ -23,7 +23,7 @@ imagename=${3:-kali-linux-$1-efikamx}
 size=7000
 
 # Generate a random machine name to be used.
-machine=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)
+machine=$(dbus-uuidgen)
 
 # Make sure that the cross compiler can be found in the path before we do
 # anything else, that way the builds don't fail half way through.
@@ -102,10 +102,6 @@ auto eth0
 iface eth0 inet dhcp
 EOF
 
-cat << EOF > kali-${architecture}/etc/resolv.conf
-nameserver 8.8.8.8
-EOF
-
 export MALLOC_CHECK_=0 # workaround for LP: #520465
 export LC_ALL=C
 export DEBIAN_FRONTEND=noninteractive
@@ -175,10 +171,8 @@ EOF
 chmod 755 kali-${architecture}/cleanup
 LANG=C systemd-nspawn -M ${machine} -D kali-${architecture} /cleanup
 
-#umount kali-${architecture}/proc/sys/fs/binfmt_misc
-#umount kali-${architecture}/dev/pts
-#umount kali-${architecture}/dev/
-#umount kali-${architecture}/proc
+# Define DNS server after last running systemd-nspawn.
+echo "nameserver 8.8.8.8" > ${work_dir}/etc/resolv.conf
 
 # For serial console you can use one of the following two items.
 # (No auto login)
@@ -267,12 +261,6 @@ mkdir -p "${basedir}"/root
 mount ${rootp} "${basedir}"/root
 mkdir -p "${basedir}"/root/boot
 mount ${bootp} "${basedir}"/root/boot
-
-
-# We do this down here to get rid of the build system's resolv.conf after running through the build.
-cat << EOF > kali-${architecture}/etc/resolv.conf
-nameserver 8.8.8.8
-EOF
 
 echo "Rsyncing rootfs into image file"
 rsync -HPavz -q "${basedir}"/kali-${architecture}/ "${basedir}"/root/
