@@ -320,6 +320,7 @@ fc-cache -frs
 rm -rf /tmp/*
 rm -rf /etc/*-
 rm -rf /hs_err*
+rm -rf /third-stage
 rm -rf /userland
 rm -rf /opt/vc/src
 rm -f /etc/ssh/ssh_host_*
