@@ -313,14 +313,14 @@ cd ${basedir}
 # Kernel section.  If you want to use a custom kernel, or configuration, replace
 # them in this section.
 # Mainline kernel branch
-git clone https://kernel.googlesource.com/pub/scm/linux/kernel/git/stable/linux.git -b linux-5.8.y ${work_dir}/usr/src/kernel
+git clone --depth 1 https://kernel.googlesource.com/pub/scm/linux/kernel/git/stable/linux.git -b linux-5.8.y ${work_dir}/usr/src/kernel
 # ChromeOS kernel branch
 #git clone --depth 1 https://chromium.googlesource.com/chromiumos/third_party/kernel.git -b release-${kernel_release} ${work_dir}/usr/src/kernel
 cd ${work_dir}/usr/src/kernel
 # Check out 4.19.133 which was known to work...
 #git checkout 17a87580a8856170d59aab302226811a4ae69149
 # Mainline kernel config
-cp ${basedir}/../kernel-configs/veyron-5.8.8.config .config
+cp ${basedir}/../kernel-configs/veyron-5.8.7.config .config
 # (Currently not working) chromeos-based kernel config
 #cp ${basedir}/../kernel-configs/veyron-4.19-cros.config .config
 cp .config ${work_dir}/usr/src/veyron.config
@@ -467,7 +467,7 @@ dd if=/dev/zero of=bootloader.bin bs=512 count=1
 vbutil_kernel --arch arm --pack "${basedir}"/kernel.bin --keyblock /usr/share/vboot/devkeys/kernel.keyblock --signprivate /usr/share/vboot/devkeys/kernel_data_key.vbprivk --version 1 --config cmdline --bootloader bootloader.bin --vmlinuz veyron-kernel
 cd ${work_dir}/usr/src/kernel
 make mrproper
-cp ${basedir}/../kernel-configs/veyron-5.8.8.config .config
+cp ${basedir}/../kernel-configs/veyron-5.8.7.config .config
 cd ${basedir}
 
 # Fix up the symlink for building external modules
