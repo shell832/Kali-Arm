@@ -460,6 +460,9 @@ mkimage -D "-I dts -O dtb -p 2048" -f kernel-veyron.its veyron-kernel
 # BEHOLD THE MAGIC OF PARTUUID/PARTNROFF
 echo 'noinitrd console=tty1 quiet root=PARTUUID=%U/PARTNROFF=1 rootwait rw lsm.module_locking=0 net.ifnames=0 rootfstype=$fstype' > cmdline
 
+# Print out the cmdline so we can see what it's looking at/for...
+cat cmdline
+
 # Pulled from ChromeOS, this is exactly what they do because there's no
 # bootloader in the kernel partition on ARM.
 dd if=/dev/zero of=bootloader.bin bs=512 count=1
