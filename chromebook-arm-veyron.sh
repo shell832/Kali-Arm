@@ -458,7 +458,7 @@ cd ${work_dir}/usr/src/kernel/arch/arm/boot
 mkimage -D "-I dts -O dtb -p 2048" -f kernel-veyron.its veyron-kernel
 
 # BEHOLD THE MAGIC OF PARTUUID/PARTNROFF
-echo 'noinitrd console=tty1 quiet root=PARTUUID=%U/PARTNROFF=1 rootwait rw lsm.module_locking=0 net.ifnames=0 rootfstype=$fstype' > cmdline
+echo "noinitrd console=tty1 quiet root=PARTUUID=%U/PARTNROFF=1 rootwait rw lsm.module_locking=0 net.ifnames=0 rootfstype=$fstype" > cmdline
 
 # Print out the cmdline so we can see what it's looking at/for...
 cat cmdline
