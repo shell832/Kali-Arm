@@ -76,7 +76,7 @@ fi
 
 components="main,contrib,non-free"
 arm="kali-linux-arm ntpdate"
-base="apt-transport-https apt-utils bash-completion conole-setup dialog e2fsprogs ifupdown initramfs-tools inxi iw man-db mlocate netcat-traditional net-tools parted pciutls psmisc rfkill screen tmux unrar usbutils vim wget whiptail zerofree"
+base="apt-transport-https apt-utils bash-completion console-setup dialog e2fsprogs ifupdown initramfs-tools inxi iw man-db mlocate netcat-traditional net-tools parted pciutils psmisc rfkill screen tmux unrar usbutils vim wget whiptail zerofree"
 desktop="kali-desktop-xfce kali-root-login xserver-xorg-video-fbdev xfonts-terminus xinput"
 tools="kali-tools-top10 wireshark"
 services="apache2 atftpd"
