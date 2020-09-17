@@ -209,7 +209,7 @@ int uname(struct utsname *buf)
 {
  int ret;
  ret = syscall(SYS_uname, buf);
- strcpy(buf->release, "5.7.0-kali1-armmp");
+ strcpy(buf->release, "5.8.0-kali1-armmp");
  strcpy(buf->machine, "armv7l");
  return ret;
 }
