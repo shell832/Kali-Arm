@@ -260,6 +260,9 @@ U_BOOT_PARAMETERS="console=ttyS0,115200 console=tty1 root=/dev/mmcblk0p1 rootwai
 U_BOOT_MENU_LABEL="Kali Linux"
 _EOF_
 
+# And now that we've changed the defaults, run u-boot-update to generate the extlinux.conf
+u-boot-update
+
 # Install touchpad config file
 install -m644 /bsp/xorg/50-pine64-pinebook.touchpad.conf /etc/X11/xorg.conf.d/
 
