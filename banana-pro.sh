@@ -268,8 +268,12 @@ sed -i 's/^TimeoutStartSec=5min/TimeoutStartSec=25/g' "/usr/lib/systemd/system/n
 # We replace the u-boot menu defaults here so we can make sure the build system doesn't poison it.
 # We use _EOF_ so that the third-stage script doesn't end prematurely.
 cat << '_EOF_' > /etc/default/u-boot
-U_BOOT_PARAMETERS="console=ttyS0,115200 console=tty1 root=/dev/mmcblk0p1 rootwait panic=10 rw rootfstype=$fstype net.ifnames=0"
+U_BOOT_PARAMETERS="console=ttyS0,115200 console=tty1 rootwait panic=10 rw rootfstype=$fstype net.ifnames=0"
+U_BOOT_MENU_LABEL="Kali Linux"
 _EOF_
+
+# And now that we've changed the defaults, run u-boot-update to generate the extlinux.conf
+u-boot-update
 
 # Clean up dpkg.eatmydata
 rm -f /usr/bin/dpkg
@@ -322,11 +326,6 @@ deb ${mirror} ${suite} ${components//,/ }
 #deb-src ${mirror} ${suite} ${components//,/ }
 EOF
 
-# Build system will insert it's root filesystem into the extlinux.conf file so
-# we sed it out, this only affects build time, not upgrading the kernel on the
-# device itself.
-sed -i -e 's/append.*/append console=ttyS0,115200 console=tty1 root=\/dev\/mmcblk0p1 rootwait panic=10 rw rootfstype=$fstype net.ifnames=0/g' ${work_dir}/boot/extlinux/extlinux.conf
-
 # Calculate the space to create the image.
 root_size=$(du -s -B1 ${work_dir} --exclude=${work_dir}/boot | cut -f1)
 root_extra=$((${root_size}/1024/1000*5*1024/5))
@@ -359,6 +358,9 @@ mount ${rootp} "${basedir}"/root
 # Create an fstab so that we don't mount / read-only.
 UUID=$(blkid -s UUID -o value ${rootp})
 echo "UUID=$UUID /               $fstype    errors=remount-ro 0       1" >> ${work_dir}/etc/fstab
+
+# Ensure we don't have the build server's rootfs set for the root device in extlinux.conf
+sed -i -e "0,/root=.*/s//root=UUID=$(blkid -s UUID -o value ${rootp}) rootfstype=$fstype console=ttyS0,115200 console=tty1 consoleblank=0 quiet rootwait/g" ${workdir}/boot/extlinux/extlinux.conf
 
 echo "Rsyncing rootfs to image file"
 rsync -HPavz -q ${work_dir}/ ${basedir}/root/
