@@ -360,7 +360,7 @@ UUID=$(blkid -s UUID -o value ${rootp})
 echo "UUID=$UUID /               $fstype    errors=remount-ro 0       1" >> ${work_dir}/etc/fstab
 
 # Ensure we don't have the build server's rootfs set for the root device in extlinux.conf
-sed -i -e "0,/root=.*/s//root=UUID=$(blkid -s UUID -o value ${rootp}) rootfstype=$fstype console=ttyS0,115200 console=tty1 consoleblank=0 quiet rootwait/g" ${workdir}/boot/extlinux/extlinux.conf
+sed -i -e "0,/root=.*/s//root=UUID=$(blkid -s UUID -o value ${rootp}) rootfstype=$fstype console=ttyS0,115200 console=tty1 consoleblank=0 quiet rootwait/g" ${work_dir}/boot/extlinux/extlinux.conf
 
 echo "Rsyncing rootfs to image file"
 rsync -HPavz -q ${work_dir}/ ${basedir}/root/
