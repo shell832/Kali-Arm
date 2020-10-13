@@ -248,7 +248,7 @@ install -m644 /bsp/udev/99-vchiq-permissions.rules /etc/udev/rules.d/
 # Bluetooth enabling
 install -m644 /bsp/bluetooth/rpi/99-com.rules /etc/udev/rules.d/
 install -m644 /bsp/bluetooth/rpi/hciuart.service /etc/systemd/system/
-install -m644 /bsp/bluetooth/rpi/btuart /usr/bin/
+install -m755 /bsp/bluetooth/rpi/btuart /usr/bin/
 
 # Copy in the bluetooth firmware
 install -m644 /bsp/firmware/rpi/BCM43430A1.hcd -D /lib/firmware/brcm/BCM43430A1.hcd
