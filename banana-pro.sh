@@ -27,6 +27,8 @@ bootsize="128"
 compress="xz"
 # Choose filesystem format to format ( ext3 or ext4 )
 fstype="ext3"
+# Generate a random root UUID to be used.
+root_uuid=$(cat /proc/sys/kernel/random/uuid)
 # If you have your own preferred mirrors, set them here.
 mirror=${mirror:-"http://http.kali.org/kali"}
 # Gitlab url Kali repository
@@ -117,7 +119,7 @@ eatmydata debootstrap --foreign --keyring=/usr/share/keyrings/kali-archive-keyri
 
 # systemd-nspawn enviroment
 systemd-nspawn_exec(){
-  LANG=C systemd-nspawn -q --bind-ro ${qemu_bin} --capability=cap_setfcap --setenv=RUNLEVEL=1 -M ${machine} -D ${work_dir} "$@"
+  LANG=C systemd-nspawn -q --bind-ro ${qemu_bin} --capability=cap_setfcap -E RUNLEVEL=1 -M ${machine} -D ${work_dir} "$@"
 }
 
 # We need to manually extract eatmydata to use it for the second stage.
@@ -158,7 +160,8 @@ echo "${hostname}" > ${work_dir}/etc/hostname
 
 # So X doesn't complain, we add kali to hosts
 cat << EOF > ${work_dir}/etc/hosts
-127.0.0.1       ${hostname}    localhost
+127.0.1.1       ${hostname}
+127.0.0.1       localhost
 ::1             localhost ip6-localhost ip6-loopback
 fe00::0         ip6-localnet
 ff00::0         ip6-mcastprefix
@@ -265,12 +268,15 @@ echo "T1:12345:respawn:/sbin/agetty -L ttyS0 115200 vt100" >> /etc/inittab
 # Fix startup time from 5 minutes to 25 secs on raising interfaces
 sed -i 's/^TimeoutStartSec=5min/TimeoutStartSec=25/g' "/usr/lib/systemd/system/networking.service"
 
-# We replace the u-boot menu defaults here so we can make sure the build system doesn't poison it.
-# We use _EOF_ so that the third-stage script doesn't end prematurely.
-cat << '_EOF_' > /etc/default/u-boot
-U_BOOT_PARAMETERS="console=ttyS0,115200 console=tty1 rootwait panic=10 rw rootfstype=$fstype net.ifnames=0"
+# Create an fstab so that we don't mount / read-only.
+echo "UUID=$root_uuid /               $fstype    errors=remount-ro 0       1" >> /etc/fstab
+
+# u-boot config
+cat > /etc/default/u-boot <<EOM
+U_BOOT_ROOT="root=UUID=$root_uuid"
+U_BOOT_PARAMETERS="console=ttyS0,115200 console=tty1 consoleblank=0 panic=10 rw rootfstype=$fstype net.ifnames=0 quiet rootwait"
 U_BOOT_MENU_LABEL="Kali Linux"
-_EOF_
+EOM
 
 # And now that we've changed the defaults, run u-boot-update to generate the extlinux.conf
 u-boot-update
@@ -338,29 +344,19 @@ parted -s ${current_dir}/${imagename}.img mklabel msdos
 parted -s -a minimal ${current_dir}/${imagename}.img mkpart primary $fstype 1MiB 100%
 
 # Set the partition variables
-loopdevice=`losetup -f --show ${current_dir}/${imagename}.img`
-device=`kpartx -va ${loopdevice} | sed 's/.*\(loop[0-9]\+\)p.*/\1/g' | head -1`
-sleep 5
-device="/dev/mapper/${device}"
-rootp=${device}p1
+loopdevice=$(losetup --show -fP "${current_dir}/${imagename}.img")
+rootp="${loopdevice}p1"
 
 if [[ $fstype == ext4 ]]; then
   features="-O ^64bit,^metadata_csum"
 elif [[ $fstype == ext3 ]]; then
   features="-O ^64bit"
 fi
-mkfs $features -t $fstype -L ROOTFS ${rootp}
+mkfs -U $root_uuid $features -t $fstype -L ROOTFS ${rootp}
 
 # Create the dirs for the partitions and mount them
 mkdir -p "${basedir}"/root
 mount ${rootp} "${basedir}"/root
-
-# Create an fstab so that we don't mount / read-only.
-UUID=$(blkid -s UUID -o value ${rootp})
-echo "UUID=$UUID /               $fstype    errors=remount-ro 0       1" >> ${work_dir}/etc/fstab
-
-# Ensure we don't have the build server's rootfs set for the root device in extlinux.conf
-sed -i -e "0,/root=.*/s//root=UUID=$(blkid -s UUID -o value ${rootp}) rootfstype=$fstype console=ttyS0,115200 console=tty1 consoleblank=0 quiet rootwait/g" ${work_dir}/boot/extlinux/extlinux.conf
 
 echo "Rsyncing rootfs to image file"
 rsync -HPavz -q ${work_dir}/ ${basedir}/root/
@@ -368,10 +364,13 @@ rsync -HPavz -q ${work_dir}/ ${basedir}/root/
 # Unmount partitions
 sync
 umount ${rootp}
-kpartx -dv ${loopdevice}
 
 dd if=${work_dir}/usr/lib/u-boot/Bananapro/u-boot-sunxi-with-spl.bin of=${loopdevice} bs=1024 seek=8
 
+# Check filesystem
+e2fsck -y -f "$rootp"
+
+# Remove loop devices
 losetup -d ${loopdevice}
 
 # Limite use cpu function
@@ -394,6 +393,7 @@ limit_cpu (){
       fi
     }
   done
+  cgdelete -g cpu:/cpulimit-"$rand"
 }
 
 if [ $compress = xz ]; then
