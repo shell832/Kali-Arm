@@ -278,6 +278,7 @@ systemctl enable regenerate_ssh_host_keys
 systemctl enable ssh
 
 # Enable copying of user wpa_supplicant.conf file
+install -m755 /bsp/scripts/copy-user-wpasupplicant.sh /usr/bin
 systemctl enable copy-user-wpasupplicant
 
 # We don't use network-manager on the 0w so we need to make sure wpa_supplicant is started

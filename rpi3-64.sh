@@ -277,6 +277,7 @@ systemctl enable regenerate_ssh_host_keys
 systemctl enable hciuart
 
 # Enable copying of user wpa_supplicant.conf file
+install -m755 /bsp/scripts/copy-user-wpasupplicant.sh /usr/bin
 systemctl enable copy-user-wpasupplicant
 
 # Enable... enabling ssh by putting ssh or ssh.txt file in /boot
