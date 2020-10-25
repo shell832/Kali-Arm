@@ -308,7 +308,7 @@ AUTOINSTALL="yes"
 
 CLEAN[0]="make clean"
 
-MAKE[0]="'make' -j4 ARCH=arm64 KVER=5.8.0-kali2-arm64 KSRC=/lib/modules/5.8.0-kali2-arm64/build/"
+MAKE[0]="'make' -j4 ARCH=arm64 KVER=5.8.0-kali3-arm64 KSRC=/lib/modules/5.8.0-kali3-arm64/build/"
 
 BUILT_MODULE_NAME[0]="8723cs"
 
@@ -318,7 +318,7 @@ DEST_MODULE_LOCATION[0]="/kernel/drivers/net/wireless"
 __EOF__
 
 cd /usr/src/rtl8723cs-2020.02.27
-dkms install rtl8723cs/2020.02.27 -k 5.8.0-kali2-arm64
+dkms install rtl8723cs/2020.02.27 -k 5.8.0-kali3-arm64
 
 # Replace the conf file after we've built the module and hope for the best
 mv /usr/src/rtl8723cs-2020.02.27/dkms.conf.orig /usr/src/rtl8723cs-2020.02.27/dkms.conf
