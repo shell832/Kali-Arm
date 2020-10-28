@@ -17,7 +17,7 @@ machine=$(dbus-uuidgen)
 # Custom hostname variable
 hostname=${2:-kali}
 # Custom image file name variable - MUST NOT include .img at the end.
-imagename=${3:-kali-linux-$1-rpi3-nexmon-64-lite}
+imagename=${3:-kali-linux-$1-rpi4-nexmon-64-lite}
 # Suite to use, valid options are:
 # kali-rolling, kali-dev, kali-bleeding-edge, kali-dev-only, kali-experimental, kali-last-snapshot
 suite=${suite:-"kali-rolling"}
@@ -59,7 +59,7 @@ fi
 # Current directory
 current_dir="$(pwd)"
 # Base directory
-basedir=${current_dir}/rpi3-nexmon-64-"$1"-lite
+basedir=${current_dir}/rpi4-nexmon-64-"$1"-lite
 # Working directory
 work_dir="${basedir}/kali-${architecture}"
 
