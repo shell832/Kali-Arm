@@ -248,6 +248,10 @@ cp -p /bsp/services/rpi/rpi-resizerootfs.service /etc/systemd/system/
 install -m755 /bsp/scripts/rpi-resizerootfs /usr/sbin/
 systemctl enable rpi-resizerootfs
 
+# Without governor_simpleondemand, the lima driver fails to load
+echo 'governor_simpleondemand' >> /etc/initramfs-tools/modules
+update-initramfs -u -k \$(ls /lib/modules/)
+
 # For some reason the latest modesetting driver (part of xorg server)
 # seems to cause a lot of jerkiness.  Using the fbdev driver is not
 # ideal but it's far less frustrating to work with.
