@@ -13,6 +13,7 @@ if [ -f /boot/wpa_supplicant.conf ]; then
         ipv4.method auto
     else
       install -m600 /boot/wpa_supplicant.conf /etc/wpa_supplicant
-      rm -f /boot/wpa_supplicant.conf
+    fi
   fi
+  rm -f /boot/wpa_supplicant.conf
 fi
