@@ -60,14 +60,10 @@ apt-wait () {
 
   if [ "$1" == "update" ];then
     apt-get update
-  elif [ "$1" == "install" ];then
-    apt-get -y -qq $@
   elif [ "$1" == "install_deps" ];then
     apt-get install -y -qq $deps
   elif [ "$1" == "remove" ];then
     apt-get -y --purge "$@"
-  elif [ "$1" == "dpkg" ];then
-    "$@"
   fi
 }
 
@@ -87,26 +83,26 @@ echo "Waiting for other software manager to finish..."
 
 # Install packages i386
 if [ $(arch) == 'x86_64' ]; then
-  if [ -z $(dpkg --print-foreign-architectures|grep i386) ]; then
+  if [ -z $(dpkg --print-foreign-architectures | grep i386) ]; then
     dpkg --add-architecture i386
     apt-wait update
     deps="libstdc++6:i386 libc6:i386 libgcc1:i386 zlib1g:i386 libncurses5:i386"
     apt-wait install_deps
     del_arch_i386="dpkg --remove-architecture i386"
-  elif [[ $(dpkg --print-foreign-architectures|grep i386) == 'i386' ]]; then
+  elif [[ $(dpkg --print-foreign-architectures | grep i386) == 'i386' ]]; then
     deps="libstdc++6:i386 libc6:i386 libgcc1:i386 zlib1g:i386 libncurses5:i386"
     apt-wait install_deps
   fi
-else
-  deps="libncurses5"
-  apt-wait install
+elif [ $(arch) == 'i386' ]; then
+  deps="libstdc++6 libc6 libgcc1 zlib1g libncurses5"
+  apt-wait install_deps
 fi
 
 # Create the script to clean the system.
 clean-system
 
 # Check minimum version debootstrap.
-debootstrap_ver=$(debootstrap --version |  grep -o '[0-9.]\+' | head -1)
+debootstrap_ver=$(debootstrap --version | grep -o '[0-9.]\+' | head -1)
 if dpkg --compare-versions "$debootstrap_ver" lt "1.0.105"; then
     echo "Currently your version of debootstrap does not support the script." >&2
     echo "The minimum version of debootstrap is 1.0.105" >&2
