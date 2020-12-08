@@ -341,7 +341,7 @@ cd linux
 touch .scmversion
 #patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/pinebook-pro/0001-net-smsc95xx-Allow-mac-address-to-be-set-as-a-parame.patch
 #patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/pinebook-pro/0008-board-rockpi4-dts-upper-port-host.patch
-patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/pinebook-pro/0008-rk-hwacc-drm.patch
+#patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/pinebook-pro/0008-rk-hwacc-drm.patch
 patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/pinebook-pro/kali-wifi-injection.patch
 cp ${current_dir}/kernel-configs/pinebook-pro-5.7.config .config
 make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- oldconfig
