@@ -339,7 +339,7 @@ cd ${work_dir}/usr/src
 git clone https://gitlab.manjaro.org/tsys/linux-pinebook-pro.git --depth 1 linux
 cd linux
 touch .scmversion
-patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/pinebook-pro/0001-net-smsc95xx-Allow-mac-address-to-be-set-as-a-parame.patch
+#patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/pinebook-pro/0001-net-smsc95xx-Allow-mac-address-to-be-set-as-a-parame.patch
 patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/pinebook-pro/0008-board-rockpi4-dts-upper-port-host.patch
 patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/pinebook-pro/0008-rk-hwacc-drm.patch
 patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/pinebook-pro/kali-wifi-injection.patch
