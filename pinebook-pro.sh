@@ -360,7 +360,7 @@ cp ${current_dir}/kernel-configs/pinebook-pro-5.7.config ../default-config
 # Fix up the symlink for building external modules
 # kernver is used to we don't need to keep track of what the current compiled
 # version is
-kernver=5.7.0
+kernver=$(ls ${work_dir}/lib/modules/)
 cd ${work_dir}/lib/modules/${kernver}/
 rm build
 rm source
