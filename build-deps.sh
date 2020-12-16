@@ -86,11 +86,11 @@ if [ $(arch) == 'x86_64' ]; then
   if [ -z $(dpkg --print-foreign-architectures | grep i386) ]; then
     dpkg --add-architecture i386
     apt-wait update
-    deps="libstdc++6:i386 libc6:i386 libgcc1:i386 zlib1g:i386 libncurses5:i386"
+    deps="-o APT::Immediate-Configure=0 libstdc++6:i386 libc6:i386 libgcc1:i386 zlib1g:i386 libncurses5:i386"
     apt-wait install_deps
     del_arch_i386="dpkg --remove-architecture i386"
   elif [[ $(dpkg --print-foreign-architectures | grep i386) == 'i386' ]]; then
-    deps="libstdc++6:i386 libc6:i386 libgcc1:i386 zlib1g:i386 libncurses5:i386"
+    deps="-o APT::Immediate-Configure=0 libstdc++6:i386 libc6:i386 libgcc1:i386 zlib1g:i386 libncurses5:i386"
     apt-wait install_deps
   fi
 elif [ $(arch) == 'i386' ]; then
