@@ -550,8 +550,8 @@ umount ${rootp}
 kpartx -dv ${loopdevice}
 
 cd "${basedir}"
-wget ftp://ftp.denx.de/pub/u-boot/u-boot-2018.05.tar.bz2
-tar xvf u-boot-2018.05.tar.bz2 && cd u-boot-2018.05
+wget ftp://ftp.denx.de/pub/u-boot/u-boot-2020.10.tar.bz2
+tar xvf u-boot-2020.10.tar.bz2 && cd u-boot-2020.10
 make distclean
 make usbarmory_config
 make ARCH=arm
