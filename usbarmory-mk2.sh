@@ -390,10 +390,10 @@ wget $githubraw/inversepath/usbarmory/master/software/kernel_conf/mark-two/imx6u
 wget $githubraw/inversepath/usbarmory/master/software/kernel_conf/mark-two/imx6ulz-usbarmory.dts -O arch/arm/boot/dts/imx6ulz-usbarmory.dts
 cp ${current_dir}/kernel-configs/usbarmory-5.4.config ${work_dir}/usr/src/kernel/.config
 cp ${current_dir}/kernel-configs/usbarmory-5.4.config ${work_dir}/usr/src/usbarmory-5.4.config
-make LOADADDR=0x80000000 -j $(grep -c processor /proc/cpuinfo) uImage modules imx6ul-usbarmory.dts imx6ull-usbarmory.dts imx6ulz-usbarmory.dts
+make LOADADDR=0x80000000 -j $(grep -c processor /proc/cpuinfo) uImage modules imx6ul-usbarmory.dtb imx6ull-usbarmory.dtb imx6ulz-usbarmory.dtb
 make modules_install INSTALL_MOD_PATH=${work_dir}
 cp arch/arm/boot/zImage ${work_dir}/boot/
-cp arch/arm/boot/dts/imx53-usbarmory*.dtb ${work_dir}/boot/
+cp arch/arm/boot/dts/imx6*-usbarmory*.dtb ${work_dir}/boot/
 make mrproper
 # Since these aren't integrated into the kernel yet, mrproper removes them.
 cp ${current_dir}/kernel-configs/usbarmory-5.4.config ${work_dir}/usr/src/kernel/.config
