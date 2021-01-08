@@ -257,7 +257,8 @@ apt download -o APT::Sandbox::User=root ca-certificates 2>/dev/null
 cp /etc/skel/.bashrc /root/.bashrc
 
 # Set a REGDOMAIN.  This needs to be done or wireless doesn't work correctly on the RPi 3B+
-sed -i -e 's/REGDOM.*/REGDOMAIN=00/g' /etc/default/crda
+# We don't want to fail here, if the file doesn't exist, so true
+sed -i -e 's/REGDOM.*/REGDOMAIN=00/g' /etc/default/crda || true
 
 # Try and make the console a bit nicer
 # Set the terminus font for a bit nicer display.
