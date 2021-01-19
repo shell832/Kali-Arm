@@ -124,9 +124,19 @@ esac
 eatmydata debootstrap --foreign --keyring=/usr/share/keyrings/kali-archive-keyring.gpg --include=kali-archive-keyring,eatmydata \
   --components=${components} --arch ${architecture} ${suite} ${work_dir} http://http.kali.org/kali
 
+# Check systemd-nspawn version
+nspawn_ver=$(systemd-nspawn --version | awk '{if(NR==1) print $2}')
+if [[ $nspawn_ver -ge 245 ]]; then
+  extra_args="--hostname=$hostname -q -P"
+elif [[ $nspawn_ver -ge 241 ]]; then
+  extra_args="--hostname=$hostname -q"
+else
+  extra_args="-q"
+fi
+
 # systemd-nspawn enviroment
-systemd-nspawn_exec(){
-  LANG=C systemd-nspawn -q --bind-ro ${qemu_bin} --capability=cap_setfcap --setenv=RUNLEVEL=1 -M ${machine} -D ${work_dir} "$@"
+systemd-nspawn_exec() {
+  systemd-nspawn --bind-ro "$qemu_bin" $extra_args --capability=cap_setfcap -E RUNLEVEL=1,LANG=C -M "$machine" -D "$work_dir" "$@"
 }
 
 # We need to manually extract eatmydata to use it for the second stage.
