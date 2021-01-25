@@ -81,7 +81,7 @@ base="apt-transport-https apt-utils console-setup e2fsprogs firmware-linux firmw
 #desktop="fonts-croscore fonts-crosextra-caladea fonts-crosextra-carlito kali-desktop-xfce kali-root-login lightdm network-manager network-manager-gnome xfce4 xserver-xorg-video-fbdev xserver-xorg-input-evdev xserver-xorg-input-synaptics"
 tools="aircrack-ng cewl crunch dnsrecon dnsutils ethtool exploitdb hydra john libnfc-bin medusa metasploit-framework mfoc ncrack nmap passing-the-hash proxychains recon-ng sqlmap tcpdump theharvester tor tshark usbutils whois windows-binaries winexe wpscan"
 services="apache2 atftpd openssh-server openvpn tightvncserver"
-extras="alsa-utils bc bison bluez bluez-firmware i2c-tools libnss-systemd libssl-dev lua5.1 python3-configobj python3-pip python3-requests python3-rpi.gpio python3-smbus triggerhappy wpasupplicant"
+extras="alsa-utils bc bison crda bluez bluez-firmware i2c-tools libnss-systemd libssl-dev lua5.1 python3-configobj python3-pip python3-requests python3-rpi.gpio python3-smbus triggerhappy wpasupplicant"
 
 packages="${arm} ${base} ${services}"
 

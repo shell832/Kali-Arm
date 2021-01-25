@@ -81,7 +81,7 @@ base="apt-transport-https apt-utils bash-completion console-setup dialog e2fspro
 desktop="kali-desktop-xfce kali-root-login xserver-xorg-video-fbdev xfonts-terminus xinput"
 tools="kali-linux-default"
 services="apache2 atftpd"
-extras="alsa-utils bc bison bluez bluez-firmware i2c-tools kali-linux-core libnss-systemd libssl-dev python3-configobj python3-pip python3-requests python3-rpi.gpio python3-smbus triggerhappy"
+extras="alsa-utils bc bison crda bluez bluez-firmware i2c-tools kali-linux-core libnss-systemd libssl-dev python3-configobj python3-pip python3-requests python3-rpi.gpio python3-smbus triggerhappy"
 
 packages="${arm} ${base} ${services}"
 
