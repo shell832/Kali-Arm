@@ -1,11 +1,9 @@
 #!/bin/bash
-set -e
-
 # This image is for the Pinebook.
+set -e
 
 # Uncomment to activate debug
 # debug=true
-
 if [ "$debug" = true ]; then
   exec > >(tee -a -i "${0%.*}.log") 2>&1
   set -x
@@ -14,7 +12,7 @@ fi
 # Architecture
 architecture=${architecture:-"arm64"}
 # Generate a random machine name to be used.
-machine=$(tr -cd 'A-Za-z0-9' < /dev/urandom | head -c16 ; echo)
+machine=$(dbus-uuidgen)
 # Custom hostname variable
 hostname=${2:-kali}
 # Custom image file name variable - MUST NOT include .img at the end.
@@ -82,7 +80,7 @@ base="apt-transport-https apt-utils arm-trusted-firmware bash-completion console
 desktop="kali-desktop-xfce kali-root-login xserver-xorg-input-evdev xserver-xorg-input-synaptics xfonts-terminus xinput"
 tools="kali-linux-default"
 services="apache2 atftpd"
-extras="alsa-utils bc bison bluez bluez-firmware kali-linux-core libnss-systemd libssl-dev triggerhappy"
+extras="alsa-utils bc bison crda bluez bluez-firmware kali-linux-core libnss-systemd libssl-dev triggerhappy"
 
 packages="${arm} ${base} ${services}"
 
@@ -102,16 +100,17 @@ elif [ "$apt_cacher" = "apt-cacher-ng" ] ; then
 fi
 
 # Detect architecture
-if [[ "${architecture}" == "arm64" ]]; then
-        qemu_bin="/usr/bin/qemu-aarch64-static"
-        lib_arch="aarch64-linux-gnu"
-elif [[ "${architecture}" == "armhf" ]]; then
-        qemu_bin="/usr/bin/qemu-arm-static"
-        lib_arch="arm-linux-gnueabihf"
-elif [[ "${architecture}" == "armel" ]]; then
-        qemu_bin="/usr/bin/qemu-arm-static"
-        lib_arch="arm-linux-gnueabi"
-fi
+case ${architecture} in
+  arm64)
+    qemu_bin="/usr/bin/qemu-aarch64-static"
+    lib_arch="aarch64-linux-gnu" ;;
+  armhf)
+    qemu_bin="/usr/bin/qemu-arm-static"
+    lib_arch="arm-linux-gnueabihf" ;;
+  armel)
+    qemu_bin="/usr/bin/qemu-arm-static"
+    lib_arch="arm-linux-gnueabi" ;;
+esac
 
 # create the rootfs - not much to modify here, except maybe throw in some more packages if you want.
 eatmydata debootstrap --foreign --keyring=/usr/share/keyrings/kali-archive-keyring.gpg --include=kali-archive-keyring,eatmydata \
@@ -119,7 +118,7 @@ eatmydata debootstrap --foreign --keyring=/usr/share/keyrings/kali-archive-keyri
 
 # systemd-nspawn enviroment
 systemd-nspawn_exec(){
-  LANG=C systemd-nspawn -q --bind-ro ${qemu_bin} -M ${machine} -D ${work_dir} "$@"
+  LANG=C systemd-nspawn -q --bind-ro ${qemu_bin} --capability=cap_setfcap --setenv=RUNLEVEL=1 -M ${machine} -D ${work_dir} "$@"
 }
 
 # We need to manually extract eatmydata to use it for the second stage.
@@ -178,9 +177,6 @@ cat << EOF > ${work_dir}/etc/network/interfaces
 auto lo
 iface lo inet loopback
 EOF
-
-# DNS server
-echo "nameserver 8.8.8.8" > ${work_dir}/etc/resolv.conf
 
 # Copy directory bsp into build dir.
 cp -rp bsp ${work_dir}
@@ -264,6 +260,9 @@ U_BOOT_PARAMETERS="console=ttyS0,115200 console=tty1 root=/dev/mmcblk0p1 rootwai
 U_BOOT_MENU_LABEL="Kali Linux"
 _EOF_
 
+# And now that we've changed the defaults, run u-boot-update to generate the extlinux.conf
+u-boot-update
+
 # Install touchpad config file
 install -m644 /bsp/xorg/50-pine64-pinebook.touchpad.conf /etc/X11/xorg.conf.d/
 
@@ -309,7 +308,7 @@ AUTOINSTALL="yes"
 
 CLEAN[0]="make clean"
 
-MAKE[0]="'make' -j4 ARCH=arm64 KVER=5.7.0-kali1-arm64 KSRC=/lib/modules/5.7.0-kali1-arm64/build/"
+MAKE[0]="'make' -j4 ARCH=arm64 KVER=\$(ls /lib/modules/) KSRC=/lib/modules/\$(ls /lib/modules/)/build/"
 
 BUILT_MODULE_NAME[0]="8723cs"
 
@@ -319,20 +318,19 @@ DEST_MODULE_LOCATION[0]="/kernel/drivers/net/wireless"
 __EOF__
 
 cd /usr/src/rtl8723cs-2020.02.27
-dkms install rtl8723cs/2020.02.27 -k 5.7.0-kali1-arm64
+dkms install rtl8723cs/2020.02.27 -k \$(ls /lib/modules/)
 
 # Replace the conf file after we've built the module and hope for the best
 mv /usr/src/rtl8723cs-2020.02.27/dkms.conf.orig /usr/src/rtl8723cs-2020.02.27/dkms.conf
 
+# Clean up dpkg.eatmydata
 rm -f /usr/bin/dpkg
+dpkg-divert --remove --rename /usr/bin/dpkg
 EOF
 
 # Run third stage
 chmod 755 ${work_dir}/third-stage
 systemd-nspawn_exec /third-stage
-
-# Clean up eatmydata
-systemd-nspawn_exec dpkg-divert --remove --rename /usr/bin/dpkg
 
 # Clean system
 systemd-nspawn_exec << 'EOF'
@@ -342,6 +340,7 @@ fc-cache -frs
 rm -rf /tmp/*
 rm -rf /etc/*-
 rm -rf /hs_err*
+rm -rf /third-stage
 rm -rf /userland
 rm -rf /opt/vc/src
 rm -f /etc/ssh/ssh_host_*
@@ -353,6 +352,9 @@ rm -rf /var/cache/debconf/*.data-old
 for logs in $(find /var/log -type f); do > $logs; done
 history -c
 EOF
+
+# Define DNS server after last running systemd-nspawn.
+echo "nameserver 8.8.8.8" > ${work_dir}/etc/resolv.conf
 
 # Disable the use of http proxy in case it is enabled.
 if [ -n "$proxy_url" ]; then
@@ -366,6 +368,12 @@ if [[ ! -z "${4}" || ! -z "${5}" ]]; then
   suite=${5}
 fi
 
+# Define sources.list
+cat << EOF > ${work_dir}/etc/apt/sources.list
+deb ${mirror} ${suite} ${components//,/ }
+#deb-src ${mirror} ${suite} ${components//,/ }
+EOF
+
 # Set up some defaults for chromium, if the user ever installs it
 mkdir -p ${work_dir}/etc/chromium/
 cat << EOF > ${work_dir}/etc/chromium/default
@@ -378,12 +386,6 @@ CHROMIUM_FLAGS="\
 --profiler-timing=0 \
 --disable-composited-antialiasing \
 "
-EOF
-
-# Define sources.list
-cat << EOF > ${work_dir}/etc/apt/sources.list
-deb ${mirror} ${suite} ${components//,/ }
-#deb-src ${mirror} ${suite} ${components//,/ }
 EOF
 
 cd ${current_dir}
@@ -416,11 +418,6 @@ mkfs $features -t $fstype -L ROOTFS ${rootp}
 # Create the dirs for the partitions and mount them
 mkdir -p "${basedir}"/root
 mount ${rootp} "${basedir}"/root
-
-# We do this down here to get rid of the build system's resolv.conf after running through the build.
-cat << EOF > ${work_dir}/etc/resolv.conf
-nameserver 8.8.8.8
-EOF
 
 # Ensure we don't have root=/dev/sda3 in the extlinux.conf which comes from running u-boot-menu in a cross chroot.
 # We do this down here because we don't know the UUID until after the image is created.
@@ -455,7 +452,6 @@ umount ${rootp}
 
 kpartx -dv ${loopdevice}
 losetup -d ${loopdevice}
-
 
 # Limite use cpu function
 limit_cpu (){

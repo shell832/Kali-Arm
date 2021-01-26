@@ -1,11 +1,9 @@
 #!/bin/bash
-set -e
-
 # This is for the Cubox-i (Freescale based) NOT the Marvell based original.
+set -e
 
 # Uncomment to activate debug
 # debug=true
-
 if [ "$debug" = true ]; then
   exec > >(tee -a -i "${0%.*}.log") 2>&1
   set -x
@@ -14,7 +12,7 @@ fi
 # Architecture
 architecture=${architecture:-"armhf"}
 # Generate a random machine name to be used.
-machine=$(tr -cd 'A-Za-z0-9' < /dev/urandom | head -c16 ; echo)
+machine=$(dbus-uuidgen)
 # Custom hostname variable
 hostname=${2:-kali}
 # Custom image file name variable - MUST NOT include .img at the end.
@@ -82,7 +80,7 @@ base="apt-transport-https apt-utils bash-completion console-setup dialog e2fspro
 desktop="kali-desktop-xfce kali-root-login xserver-xorg-video-fbdev xfonts-terminus xinput"
 tools="kali-linux-default"
 services="apache2 atftpd"
-extras="alsa-utils bc bison bluez bluez-firmware kali-linux-core libnss-systemd libssl-dev triggerhappy"
+extras="alsa-utils bc bison crda bluez bluez-firmware kali-linux-core libnss-systemd libssl-dev triggerhappy"
 
 packages="${arm} ${base} ${services}"
 
@@ -102,16 +100,17 @@ elif [ "$apt_cacher" = "apt-cacher-ng" ] ; then
 fi
 
 # Detect architecture
-if [[ "${architecture}" == "arm64" ]]; then
-        qemu_bin="/usr/bin/qemu-aarch64-static"
-        lib_arch="aarch64-linux-gnu"
-elif [[ "${architecture}" == "armhf" ]]; then
-        qemu_bin="/usr/bin/qemu-arm-static"
-        lib_arch="arm-linux-gnueabihf"
-elif [[ "${architecture}" == "armel" ]]; then
-        qemu_bin="/usr/bin/qemu-arm-static"
-        lib_arch="arm-linux-gnueabi"
-fi
+case ${architecture} in
+  arm64)
+    qemu_bin="/usr/bin/qemu-aarch64-static"
+    lib_arch="aarch64-linux-gnu" ;;
+  armhf)
+    qemu_bin="/usr/bin/qemu-arm-static"
+    lib_arch="arm-linux-gnueabihf" ;;
+  armel)
+    qemu_bin="/usr/bin/qemu-arm-static"
+    lib_arch="arm-linux-gnueabi" ;;
+esac
 
 # create the rootfs - not much to modify here, except maybe throw in some more packages if you want.
 eatmydata debootstrap --foreign --keyring=/usr/share/keyrings/kali-archive-keyring.gpg --include=kali-archive-keyring,eatmydata \
@@ -119,7 +118,7 @@ eatmydata debootstrap --foreign --keyring=/usr/share/keyrings/kali-archive-keyri
 
 # systemd-nspawn enviroment
 systemd-nspawn_exec(){
-  LANG=C systemd-nspawn -q --bind-ro ${qemu_bin} -M ${machine} -D ${work_dir} "$@"
+  LANG=C systemd-nspawn -q --bind-ro ${qemu_bin} --capability=cap_setfcap --setenv=RUNLEVEL=1 -M ${machine} -D ${work_dir} "$@"
 }
 
 # We need to manually extract eatmydata to use it for the second stage.
@@ -182,9 +181,6 @@ auto eth0
 allow-hotplug eth0
 iface eth0 inet dhcp
 EOF
-
-# DNS server
-echo "nameserver 8.8.8.8" > ${work_dir}/etc/resolv.conf
 
 # Copy directory bsp into build dir.
 cp -rp bsp ${work_dir}
@@ -275,17 +271,20 @@ sed -i 's/^TimeoutStartSec=5min/TimeoutStartSec=15/g' "/usr/lib/systemd/system/n
 # We use _EOF_ so that the third-stage script doesn't end prematurely.
 cat << '_EOF_' > /etc/default/u-boot
 U_BOOT_PARAMETERS="console=ttyS0,115200 console=tty1 root=/dev/mmcblk0p1 rootwait panic=10 rw rootfstype=$fstype net.ifnames=0"
+U_BOOT_MENU_LABEL="Kali Linux"
 _EOF_
 
+# And now that we've changed the defaults, run u-boot-update to generate the extlinux.conf
+u-boot-update
+
+# Clean up dpkg.eatmydata
 rm -f /usr/bin/dpkg
+dpkg-divert --remove --rename /usr/bin/dpkg
 EOF
 
 # Run third stage
 chmod 755 ${work_dir}/third-stage
 systemd-nspawn_exec /third-stage
-
-# Clean up eatmydata
-systemd-nspawn_exec dpkg-divert --remove --rename /usr/bin/dpkg
 
 # Clean system
 systemd-nspawn_exec << 'EOF'
@@ -295,6 +294,7 @@ fc-cache -frs
 rm -rf /tmp/*
 rm -rf /etc/*-
 rm -rf /hs_err*
+rm -rf /third-stage
 rm -rf /userland
 rm -rf /opt/vc/src
 rm -f /etc/ssh/ssh_host_*
@@ -306,6 +306,9 @@ rm -rf /var/cache/debconf/*.data-old
 for logs in $(find /var/log -type f); do > $logs; done
 history -c
 EOF
+
+# Define DNS server after last running systemd-nspawn.
+echo "nameserver 8.8.8.8" > ${work_dir}/etc/resolv.conf
 
 # Disable the use of http proxy in case it is enabled.
 if [ -n "$proxy_url" ]; then
@@ -364,11 +367,6 @@ mkfs $features -t $fstype -L ROOTFS ${rootp}
 # Create the dirs for the partitions and mount them
 mkdir -p "${basedir}"/root
 mount ${rootp} "${basedir}"/root
-
-# We do this down here to get rid of the build system's resolv.conf after running through the build.
-cat << EOF > ${work_dir}/etc/resolv.conf
-nameserver 8.8.8.8
-EOF
 
 # Create an fstab so that we don't mount / read-only.
 UUID=$(blkid -s UUID -o value ${rootp})

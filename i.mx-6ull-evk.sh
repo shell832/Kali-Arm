@@ -1,5 +1,5 @@
 #!/bin/bash
-# This image is for the Pinebook.
+
 set -e
 
 # Uncomment to activate debug
@@ -10,18 +10,18 @@ if [ "$debug" = true ]; then
 fi
 
 # Architecture
-architecture=${architecture:-"arm64"}
+architecture=${architecture:-"armhf"}
 # Generate a random machine name to be used.
 machine=$(dbus-uuidgen)
 # Custom hostname variable
 hostname=${2:-kali}
 # Custom image file name variable - MUST NOT include .img at the end.
-imagename=${3:-kali-linux-$1-pinebook-pro}
+imagename=${3:-kali-linux-$1-i.mx-6ull-evk}
 # Suite to use, valid options are:
 # kali-rolling, kali-dev, kali-bleeding-edge, kali-dev-only, kali-experimental, kali-last-snapshot
 suite=${suite:-"kali-rolling"}
 # Free space rootfs in MiB
-free_space="500"
+free_space="300"
 # /boot partition in MiB
 bootsize="128"
 # Select compression, xz or none
@@ -58,7 +58,7 @@ fi
 # Current directory
 current_dir="$(pwd)"
 # Base directory
-basedir=${current_dir}/pinebook-pro-"$1"
+basedir=${current_dir}/imx6-"$1"
 # Working directory
 work_dir="${basedir}/kali-${architecture}"
 
@@ -76,11 +76,11 @@ fi
 
 components="main,contrib,non-free"
 arm="kali-linux-arm ntpdate"
-base="apt-transport-https apt-utils bash-completion console-setup dialog dkms e2fsprogs ifupdown initramfs-tools inxi iw man-db mlocate netcat-traditional net-tools parted pciutils psmisc rfkill screen tmux unrar usbutils vim wget whiptail zerofree"
-desktop="kali-desktop-xfce kali-root-login"
+base="apt-transport-https apt-utils bash-completion console-setup dialog e2fsprogs ifupdown initramfs-tools inxi iw man-db mlocate netcat-traditional net-tools parted pciutils psmisc rfkill screen tmux unrar usbutils wget whiptail zerofree"
+desktop="kali-desktop-xfce kali-root-login xserver-xorg-video-fbdev xfonts-terminus xinput"
 tools="kali-linux-default"
 services="apache2 atftpd"
-extras="alsa-utils bc bison crda bluez bluez-firmware kali-linux-core libnss-systemd libssl-dev triggerhappy"
+extras="alsa-utils bc bison crda bluez bluez-firmware i2c-tools kali-linux-core libnss-systemd libssl-dev python3-configobj python3-pip python3-requests python3-rpi.gpio python3-smbus triggerhappy"
 
 packages="${arm} ${base} ${services}"
 
@@ -116,9 +116,14 @@ esac
 eatmydata debootstrap --foreign --keyring=/usr/share/keyrings/kali-archive-keyring.gpg --include=kali-archive-keyring,eatmydata \
   --components=${components} --arch ${architecture} ${suite} ${work_dir} http://http.kali.org/kali
 
+# systemd-nspawn versión
+nspawn_ver=$(systemd-nspawn --version | awk '{if(NR==1) print $2}')
+
 # systemd-nspawn enviroment
 systemd-nspawn_exec(){
-  LANG=C systemd-nspawn -q --bind-ro ${qemu_bin} --capability=cap_setfcap --setenv=RUNLEVEL=1 -M ${machine} -D ${work_dir} "$@"
+  [[ $nspawn_ver -ge 241 ]] && extra_args="--hostname=$hostname" || true
+  [[ $nspawn_ver -ge 245 ]] && extra_args="--console=pipe --hostname=$hostname" || true
+  systemd-nspawn -q --bind-ro ${qemu_bin} $extra_args --capability=cap_setfcap -E RUNLEVEL=1,LANG=C -M ${machine} -D ${work_dir} "$@"
 }
 
 # We need to manually extract eatmydata to use it for the second stage.
@@ -159,7 +164,8 @@ echo "${hostname}" > ${work_dir}/etc/hostname
 
 # So X doesn't complain, we add kali to hosts
 cat << EOF > ${work_dir}/etc/hosts
-127.0.0.1       ${hostname}    localhost
+127.0.1.1       ${hostname}
+127.0.0.1       localhost
 ::1             localhost ip6-localhost ip6-loopback
 fe00::0         ip6-localnet
 ff00::0         ip6-mcastprefix
@@ -192,19 +198,16 @@ if [ -n "$proxy_url" ]; then
   echo "Acquire::http { Proxy \"$proxy_url\" };" > ${work_dir}/etc/apt/apt.conf.d/66proxy
 fi
 
-# Disable RESUME (suspend/resume is currently broken anyway!) which speeds up boot massively.
-mkdir -p ${work_dir}/etc/initramfs-tools/conf.d/
-cat << EOF > ${work_dir}/etc/initramfs-tools/conf.d/resume
-RESUME=none
-EOF
-
-cat << EOF > ${work_dir}/third-stage
+# Third stage
+cat << EOF >  ${work_dir}/third-stage
 #!/bin/bash -e
 export DEBIAN_FRONTEND=noninteractive
 
 eatmydata apt-get update
 
-eatmydata apt-get -y install git binutils ca-certificates console-common cryptsetup-bin initramfs-tools less locales nano u-boot-tools
+eatmydata apt-get -y install git binutils ca-certificates console-common initramfs-tools less locales nano u-boot-tools
+
+echo 'LANG=C.UTF-8' > /etc/default/locale
 
 # Create kali user with kali password... but first, we need to manually make some groups because they don't yet exist...
 # This mirrors what we have on a pre-installed VM, until the script works properly to allow end users to set up their own... user.
@@ -222,39 +225,35 @@ echo "kali:kali" | chpasswd
 
 aptops="--allow-change-held-packages -o dpkg::options::=--force-confnew -o Acquire::Retries=3"
 
+# This looks weird, but we do it twice because every so often, there's a failure to download from the mirror
+# So to workaround it, we attempt to install them twice.
 eatmydata apt-get install -y \$aptops ${packages} || eatmydata apt-get --yes --fix-broken install
 eatmydata apt-get install -y \$aptops ${packages} || eatmydata apt-get --yes --fix-broken install
-eatmydata apt-get install -y \$aptops ${desktop} ${extras} ${tools} || eatmydata apt-get --yes --fix-broken install
-eatmydata apt-get install -y \$aptops ${desktop} ${extras} ${tools} || eatmydata apt-get --yes --fix-broken install
+#eatmydata apt-get install -y \$aptops ${desktop} ${extras} ${tools} || eatmydata apt-get --yes --fix-broken install
+#eatmydata apt-get install -y \$aptops ${desktop} ${extras} ${tools} || eatmydata apt-get --yes --fix-broken install
 eatmydata apt-get install -y \$aptops --autoremove systemd-timesyncd || eatmydata apt-get --yes --fix-broken install
-eatmydata apt-get dist-upgrade -y \$aptops
 
 # Linux console/Keyboard configuration
 echo 'console-common console-data/keymap/policy select Select keymap from full list' | debconf-set-selections
 echo 'console-common console-data/keymap/full select en-latin1-nodeadkeys' | debconf-set-selections
 
-# Copy all services
+eatmydata apt-get --yes --allow-change-held-packages autoremove
+
 cp -p /bsp/services/all/*.service /etc/systemd/system/
 
-#Touchpad settings
-install -m644 /bsp/xorg/50-pine64-pinebook-pro.touchpad.conf /etc/X11/xorg.conf.d/
-
-# Saved audio settings
-install -m644 /bsp/audio/pinebook-pro/asound.state /var/lib/alsa/asound.state
+install -m755 /bsp/scripts/rpi-resizerootfs /usr/sbin/
 
 # Regenerated the shared-mime-info database on the first boot
 # since it fails to do so properly in a chroot.
 systemctl enable smi-hack
 
+# Resize filesystem on first boot
+install -m644 /bsp/services/rpi/rpi-resizerootfs.service /etc/systemd/system/
+install -m755 /bsp/scripts/rpi-resizerootfs /usr/sbin/
+systemctl enable rpi-resizerootfs
+
 # Generate SSH host keys on first run
 systemctl enable regenerate_ssh_host_keys
-systemctl enable ssh
-
-# And enable bluetooth
-systemctl enable bluetooth
-
-# Copy bashrc
-cp  /etc/skel/.bashrc /root/.bashrc
 
 # Allow users to use NM over ssh
 install -m644 /bsp/polkit/10-NetworkManager.pkla /var/lib/polkit-1/localauthority/50-local.d
@@ -262,8 +261,19 @@ install -m644 /bsp/polkit/10-NetworkManager.pkla /var/lib/polkit-1/localauthorit
 cd /root
 apt download -o APT::Sandbox::User=root ca-certificates 2>/dev/null
 
-# Enable suspend2idle
-sed -i s/"#SuspendState=mem standby freeze"/"SuspendState=freeze"/g /etc/systemd/sleep.conf
+# Copy over the default bashrc
+cp /etc/skel/.bashrc /root/.bashrc
+
+# Enable login over serial
+echo "T0:23:respawn:/sbin/agetty -L ttyAMA0 115200 vt100" >> /etc/inittab
+
+# Try and make the console a bit nicer
+# Set the terminus font for a bit nicer display.
+sed -i -e 's/FONTFACE=.*/FONTFACE="Terminus"/' /etc/default/console-setup
+sed -i -e 's/FONTSIZE=.*/FONTSIZE="6x12"/' /etc/default/console-setup
+
+# Fix startup time from 5 minutes to 15 secs on raise interface wlan0
+sed -i 's/^TimeoutStartSec=5min/TimeoutStartSec=15/g' "/usr/lib/systemd/system/networking.service"
 
 # Clean up dpkg.eatmydata
 rm -f /usr/bin/dpkg
@@ -316,117 +326,63 @@ deb ${mirror} ${suite} ${components//,/ }
 #deb-src ${mirror} ${suite} ${components//,/ }
 EOF
 
-cd "${basedir}"
-
-# Pull in the wifi and bluetooth firmware from manjaro's git repository.
-git clone https://gitlab.manjaro.org/manjaro-arm/packages/community/ap6256-firmware.git
-cd ap6256-firmware
-mkdir brcm
-cp BCM4345C5.hcd brcm/BCM.hcd
-cp BCM4345C5.hcd brcm/BCM4345C5.hcd
-cp nvram_ap6256.txt brcm/brcmfmac43456-sdio.pine64,pinebook-pro.txt
-# Show all channels on 2.4 and 5GHz bands in all countries
-# https://gitlab.manjaro.org/manjaro-arm/packages/community/ap6256-firmware/-/issues/2
-sed -i -e 's/ccode.*/ccode=all/' brcm/brcmfmac43456-sdio.pine64,pinebook-pro.txt
-cp fw_bcm43456c5_ag.bin brcm/brcmfmac43456-sdio.bin
-cp brcmfmac43456-sdio.clm_blob brcm/brcmfmac43456-sdio.clm_blob
-mkdir -p ${work_dir}/lib/firmware/brcm/
-cp -a brcm/* ${work_dir}/lib/firmware/brcm/
-cd ${current_dir}
-
-# Time to build the kernel
-cd ${work_dir}/usr/src
-git clone https://gitlab.manjaro.org/tsys/linux-pinebook-pro.git --depth 1 linux
-cd linux
-touch .scmversion
-#patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/pinebook-pro/0001-net-smsc95xx-Allow-mac-address-to-be-set-as-a-parame.patch
-#patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/pinebook-pro/0008-board-rockpi4-dts-upper-port-host.patch
-#patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/pinebook-pro/0008-rk-hwacc-drm.patch
-patch -p1 --no-backup-if-mismatch < ${current_dir}/patches/kali-wifi-injection-5.9.patch
-cp ${current_dir}/kernel-configs/pinebook-pro-5.7.config .config
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- oldconfig
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc)
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH=${work_dir} modules_install
-cp arch/arm64/boot/Image ${work_dir}/boot
-cp arch/arm64/boot/dts/rockchip/rk3399-pinebook-pro.dtb ${work_dir}/boot
-# clean up because otherwise we leave stuff around that causes external modules
-# to fail to build.
-make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- mrproper
-# And copy the config back in again (and copy it to /usr/src to keep a backup
-# around)
-cp ${current_dir}/kernel-configs/pinebook-pro-5.7.config .config
-cp ${current_dir}/kernel-configs/pinebook-pro-5.7.config ../default-config
-
-# Fix up the symlink for building external modules
-# kernver is used to we don't need to keep track of what the current compiled
-# version is
-kernver=5.10.0-rc5
-cd ${work_dir}/lib/modules/${kernver}/
-rm build
-rm source
-ln -s /usr/src/linux build
-ln -s /usr/src/linux source
-cd ${current_dir}
-
-cat << '__EOF__' > ${work_dir}/boot/boot.txt
-# MAC address (use spaces instead of colons)
-setenv macaddr da 19 c8 7a 6d f4
-
-part uuid ${devtype} ${devnum}:${bootpart} uuid
-setenv bootargs console=ttyS2,1500000 root=PARTUUID=${uuid} rw rootwait video=eDP-1:1920x1080@60
-setenv fdtfile rk3399-pinebook-pro.dtb
-
-if load ${devtype} ${devnum}:${bootpart} ${kernel_addr_r} /boot/Image; then
-  if load ${devtype} ${devnum}:${bootpart} ${fdt_addr_r} /boot/${fdtfile}; then
-    fdt addr ${fdt_addr_r}
-    fdt resize
-    fdt set /ethernet@fe300000 local-mac-address "[${macaddr}]"
-    if load ${devtype} ${devnum}:${bootpart} ${ramdisk_addr_r} /boot/initramfs-linux.img; then
-      # This upstream Uboot doesn't support compresses cpio initrd, use kernel option to
-      # load initramfs
-      setenv bootargs ${bootargs} initrd=${ramdisk_addr_r},20M ramdisk_size=10M
-    fi;
-    booti ${kernel_addr_r} - ${fdt_addr_r};
-  fi;
-fi
-__EOF__
-cd ${work_dir}/boot
-mkimage -A arm -O linux -T script -C none -n "U-Boot boot script" -d boot.txt boot.scr
-cd ${current_dir}
-
-# Enable brightness up/down and sleep hotkeys and attempt to improve
-# touchpad performance
-mkdir -p ${work_dir}/etc/udev/hwdb.d/
-cat << 'EOF' > ${work_dir}/etc/udev/hwdb.d/10-usb-kbd.hwdb
-evdev:input:b0003v258Ap001E*
-  KEYBOARD_KEY_700a5=brightnessdown
-  KEYBOARD_KEY_700a6=brightnessup
-  KEYBOARD_KEY_70066=sleep
-  # Supposed to improve performance of touchpad
-  EVDEV_ABS_00=::15
-  EVDEV_ABS_01=::15
-  EVDEV_ABS_35=::15
-  EVDEV_ABS_36=::15
+# # Kernel section. If you want to use a custom kernel, or configuration, replace
+# # them in this section.
+cat << EOF > "${work_dir}"/etc/fstab
+LABEL=ROOTFS / auto errors=remount-ro 0 1
+LABEL=BOOT /boot auto defaults 0 0
 EOF
+
+cd ${work_dir}/usr/src
+git clone https://github.com/Freescale/linux-fslc.git --depth 1 linux
+cd linux
+make ARCH=arm KBUILD_DEFCONFIG=imx_v6_v7_defconfig defconfig
+make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- -j$(nproc)
+make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- INSTALL_MOD_PATH=${work_dir} modules_install
+cp arch/arm/boot/zImage ${work_dir}/boot
+cp arch/arm/boot/dts/*.dtb ${work_dir}/boot
+make ARCH=arm CROSS_COMPILE=arm-linux-gnueabihf- mrproper
+
+
+# Building u-boot
+cd ${work_dir}/usr/src
+git clone https://github.com/Freescale/u-boot-fslc.git u-boot
+cd u-boot
+make mx6ull_14x14_evk_defconfig
+make -j$(nproc) CROSS_COMPILE=arm-linux-gnueabihf- u-boot.imx
+cp u-boot.imx ${work_dir}/boot
+
+
+cd ${current_dir}
+rm -rf ${work_dir}/usr/src
 
 # Calculate the space to create the image.
 root_size=$(du -s -B1 ${work_dir} --exclude=${work_dir}/boot | cut -f1)
+echo $root_size
 root_extra=$((${root_size}/1024/1000*5*1024/5))
+echo $root_extra
 raw_size=$(($((${free_space}*1024))+${root_extra}+$((${bootsize}*1024))+4096))
+echo $raw_size
 
 # Create the disk and partition it
 echo "Creating image file ${imagename}.img"
 fallocate -l $(echo ${raw_size}Ki | numfmt --from=iec-i --to=si) ${current_dir}/${imagename}.img
+echo "Partitioning ${imagename}.img"
 parted -s ${current_dir}/${imagename}.img mklabel msdos
-parted -s -a minimal ${current_dir}/${imagename}.img mkpart primary $fstype 32MiB 100%
+parted -s ${current_dir}/${imagename}.img mkpart primary fat32 4MiB ${bootsize}MiB
+parted -s -a minimal ${current_dir}/${imagename}.img mkpart primary $fstype ${bootsize}MiB 100%
+
 
 # Set the partition variables
-loopdevice=`losetup -f --show ${current_dir}/${imagename}.img`
-device=`kpartx -va ${loopdevice} | sed 's/.*\(loop[0-9]\+\)p.*/\1/g' | head -1`
-sleep 5
-device="/dev/mapper/${device}"
-rootp=${device}p1
+loopdevice=$(losetup --show -fP "${current_dir}/${imagename}.img")
+bootp="${loopdevice}p1"
+rootp="${loopdevice}p2"
 
+echo "Writing u-boot"
+dd if=${work_dir}/boot/u-boot.imx of=${loopdevice} bs=512 seek=2
+
+# Create file systems
+mkfs.vfat -n BOOT -F 32 -v ${bootp}
 if [[ $fstype == ext4 ]]; then
   features="-O ^64bit,^metadata_csum"
 elif [[ $fstype == ext3 ]]; then
@@ -435,28 +391,27 @@ fi
 mkfs $features -t $fstype -L ROOTFS ${rootp}
 
 # Create the dirs for the partitions and mount them
-mkdir -p "${basedir}"/root
-mount ${rootp} "${basedir}"/root
-
-# Create an fstab so that we don't mount / read-only.
-UUID=$(blkid -s UUID -o value ${rootp})
-echo "UUID=$UUID /               $fstype    errors=remount-ro 0       1" >> ${work_dir}/etc/fstab
+mkdir -p ${basedir}/root/
+mount ${rootp} ${basedir}/root
+mkdir -p ${basedir}/root/boot
+mount ${bootp} ${basedir}/root/boot
 
 echo "Rsyncing rootfs into image file"
-rsync -HPavz -q ${work_dir}/ ${basedir}/root/
-
-# Nick the u-boot from Manjaro ARM to see if my compilation was somehow
-# screwing things up.
-cp ${current_dir}/bsp/bootloader/pinebook-pro/idbloader.img ${current_dir}/bsp/bootloader/pinebook-pro/trust.img ${current_dir}/bsp/bootloader/pinebook-pro/uboot.img ${basedir}/root/boot/
-dd if=${current_dir}/bsp/bootloader/pinebook-pro/idbloader.img of=${loopdevice} seek=64 conv=notrunc
-dd if=${current_dir}/bsp/bootloader/pinebook-pro/uboot.img of=${loopdevice} seek=16384 conv=notrunc
-dd if=${current_dir}/bsp/bootloader/pinebook-pro/trust.img of=${loopdevice} seek=24576 conv=notrunc
-
-# Unmount partitions
+rsync -HPavz -q --exclude boot ${work_dir}/ ${basedir}/root/
+rsync -rtx -q ${work_dir}/boot ${basedir}/root
 sync
-umount ${rootp}
 
-kpartx -dv ${loopdevice}
+# Make sure to enable ssh on the device by default
+touch "${basedir}"/root/boot/ssh
+
+sync
+# sleep for 10 seconds, to let the cache settle after sync.
+sleep 10
+# Unmount filesystems
+umount -l ${bootp}
+umount -l ${rootp}
+
+# Remove loop devices
 losetup -d ${loopdevice}
 
 # Limite use cpu function
@@ -479,6 +434,7 @@ limit_cpu (){
       fi
     }
   done
+  cgdelete -g cpu:/cpulimit-"$rand"
 }
 
 if [ $compress = xz ]; then
@@ -494,5 +450,5 @@ fi
 
 # Clean up all the temporary build stuff and remove the directories.
 # Comment this out to keep things around if you want to see what may have gone wrong.
-echo "Removing temporary build files"
+echo "Cleaning up the temporary build files..."
 rm -rf "${basedir}"

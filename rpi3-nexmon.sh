@@ -1,9 +1,10 @@
 #!/bin/bash
+# This is the Raspberry Pi 2 v1.2/3/4 Kali ARM 32 bit build script - http://www.kali.org/downloads
+# A trusted Kali Linux image created by Offensive Security - http://www.offensive-security.com
 set -e
 
 # Uncomment to activate debug
 # debug=true
-
 if [ "$debug" = true ]; then
   exec > >(tee -a -i "${0%.*}.log") 2>&1
   set -x
@@ -12,11 +13,11 @@ fi
 # Architecture
 architecture=${architecture:-"armhf"}
 # Generate a random machine name to be used.
-machine=$(tr -cd 'A-Za-z0-9' < /dev/urandom | head -c16 ; echo)
+machine=$(dbus-uuidgen)
 # Custom hostname variable
 hostname=${2:-kali}
 # Custom image file name variable - MUST NOT include .img at the end.
-imagename=${3:-kali-linux-$1-rpi3-nexmon}
+imagename=${3:-kali-linux-$1-rpi4-nexmon}
 # Suite to use, valid options are:
 # kali-rolling, kali-dev, kali-bleeding-edge, kali-dev-only, kali-experimental, kali-last-snapshot
 suite=${suite:-"kali-rolling"}
@@ -58,7 +59,7 @@ fi
 # Current directory
 current_dir="$(pwd)"
 # Base directory
-basedir=${current_dir}/rpi3-nexmon-"$1"
+basedir=${current_dir}/rpi4-nexmon-"$1"
 # Working directory
 work_dir="${basedir}/kali-${architecture}"
 
@@ -80,7 +81,7 @@ base="apt-transport-https apt-utils bash-completion console-setup dialog e2fspro
 desktop="kali-desktop-xfce kali-root-login xserver-xorg-video-fbdev xfonts-terminus xinput"
 tools="kali-linux-default"
 services="apache2 atftpd"
-extras="alsa-utils bc bison bluez bluez-firmware i2c-tools kali-linux-core libnss-systemd libssl-dev python3-configobj python3-pip python3-requests python3-rpi.gpio python3-smbus triggerhappy"
+extras="alsa-utils bc bison crda bluez bluez-firmware i2c-tools kali-linux-core libnss-systemd libssl-dev python3-configobj python3-pip python3-requests python3-rpi.gpio python3-smbus triggerhappy"
 
 packages="${arm} ${base} ${services}"
 
@@ -100,24 +101,35 @@ elif [ "$apt_cacher" = "apt-cacher-ng" ] ; then
 fi
 
 # Detect architecture
-if [[ "${architecture}" == "arm64" ]]; then
-        qemu_bin="/usr/bin/qemu-aarch64-static"
-        lib_arch="aarch64-linux-gnu"
-elif [[ "${architecture}" == "armhf" ]]; then
-        qemu_bin="/usr/bin/qemu-arm-static"
-        lib_arch="arm-linux-gnueabihf"
-elif [[ "${architecture}" == "armel" ]]; then
-        qemu_bin="/usr/bin/qemu-arm-static"
-        lib_arch="arm-linux-gnueabi"
-fi
+case ${architecture} in
+  arm64)
+    qemu_bin="/usr/bin/qemu-aarch64-static"
+    lib_arch="aarch64-linux-gnu" ;;
+  armhf)
+    qemu_bin="/usr/bin/qemu-arm-static"
+    lib_arch="arm-linux-gnueabihf" ;;
+  armel)
+    qemu_bin="/usr/bin/qemu-arm-static"
+    lib_arch="arm-linux-gnueabi" ;;
+esac
 
 # create the rootfs - not much to modify here, except maybe throw in some more packages if you want.
 eatmydata debootstrap --foreign --keyring=/usr/share/keyrings/kali-archive-keyring.gpg --include=kali-archive-keyring,eatmydata \
   --components=${components} --arch ${architecture} ${suite} ${work_dir} http://http.kali.org/kali
 
+# Check systemd-nspawn version
+nspawn_ver=$(systemd-nspawn --version | awk '{if(NR==1) print $2}')
+if [[ $nspawn_ver -ge 245 ]]; then
+    extra_args="--hostname=$hostname -q -P"
+elif [[ $nspawn_ver -ge 241 ]]; then
+    extra_args="--hostname=$hostname -q"
+else
+    extra_args="-q"
+fi
+
 # systemd-nspawn enviroment
-systemd-nspawn_exec(){
-  LANG=C systemd-nspawn -q --bind-ro ${qemu_bin} -M ${machine} -D ${work_dir} "$@"
+systemd-nspawn_exec() {
+  systemd-nspawn --bind-ro "$qemu_bin" $extra_args --capability=cap_setfcap -E RUNLEVEL=1,LANG=C -M "$machine" -D "$work_dir" "$@"
 }
 
 # We need to manually extract eatmydata to use it for the second stage.
@@ -181,9 +193,6 @@ allow-hotplug eth0
 iface eth0 inet dhcp
 EOF
 
-# DNS server
-echo "nameserver 8.8.8.8" > ${work_dir}/etc/resolv.conf
-
 # Copy directory bsp into build dir.
 cp -rp bsp ${work_dir}
 
@@ -231,7 +240,7 @@ eatmydata apt-get install -y \$aptops --autoremove systemd-timesyncd || eatmydat
 
 # Install the kernel packages
 echo "deb http://http.re4son-kernel.com/re4son kali-pi main" > /etc/apt/sources.list.d/re4son.list
-wget -qO /etc/apt/trusted.gpg.d/re4son-repo-key.asc https://re4son-kernel.com/keys/http/archive-key.asc
+wget -qO /etc/apt/trusted.gpg.d/kali_pi-archive-keyring.gpg https://re4son-kernel.com/keys/http/kali_pi-archive-keyring.gpg
 eatmydata apt-get update
 eatmydata apt-get install --yes --allow-change-held-packages -o dpkg::options::=--force-confnew kalipi-kernel kalipi-bootloader kalipi-re4son-firmware kalipi-kernel-headers
 
@@ -269,6 +278,7 @@ systemctl enable regenerate_ssh_host_keys
 systemctl enable hciuart
 
 # Enable copying of user wpa_supplicant.conf file
+install -m755 /bsp/scripts/copy-user-wpasupplicant.sh /usr/bin
 systemctl enable copy-user-wpasupplicant
 
 # Enable... enabling ssh by putting ssh or ssh.txt file in /boot
@@ -297,15 +307,14 @@ sed -i -e 's/FONTSIZE=.*/FONTSIZE="6x12"/' /etc/default/console-setup
 # Fix startup time from 5 minutes to 15 secs on raise interface wlan0
 sed -i 's/^TimeoutStartSec=5min/TimeoutStartSec=15/g' "/usr/lib/systemd/system/networking.service"
 
+# Clean up dpkg.eatmydata
 rm -f /usr/bin/dpkg
+dpkg-divert --remove --rename /usr/bin/dpkg
 EOF
 
 # Run third stage
 chmod 755 ${work_dir}/third-stage
 systemd-nspawn_exec /third-stage
-
-# Clean up eatmydata
-systemd-nspawn_exec dpkg-divert --remove --rename /usr/bin/dpkg
 
 # Clean system
 systemd-nspawn_exec << 'EOF'
@@ -315,6 +324,7 @@ fc-cache -frs
 rm -rf /tmp/*
 rm -rf /etc/*-
 rm -rf /hs_err*
+rm -rf /third-stage
 rm -rf /userland
 rm -rf /opt/vc/src
 rm -f /etc/ssh/ssh_host_*
@@ -326,6 +336,9 @@ rm -rf /var/cache/debconf/*.data-old
 for logs in $(find /var/log -type f); do > $logs; done
 history -c
 EOF
+
+# Define DNS server after last running systemd-nspawn.
+echo "nameserver 8.8.8.8" > ${work_dir}/etc/resolv.conf
 
 # Disable the use of http proxy in case it is enabled.
 if [ -n "$proxy_url" ]; then
@@ -339,6 +352,12 @@ if [[ ! -z "${4}" || ! -z "${5}" ]]; then
   suite=${5}
 fi
 
+# Define sources.list
+cat << EOF > ${work_dir}/etc/apt/sources.list
+deb ${mirror} ${suite} ${components//,/ }
+#deb-src ${mirror} ${suite} ${components//,/ }
+EOF
+
 # Create cmdline.txt file
 cat << EOF > ${work_dir}/boot/cmdline.txt
 dwc_otg.fiq_fix_enable=2 console=ttyAMA0,115200 kgdboc=ttyAMA0,115200 console=tty1 root=/dev/mmcblk0p2 rootfstype=$fstype rootwait rootflags=noload net.ifnames=0
@@ -351,12 +370,6 @@ cat << EOF > ${work_dir}/etc/fstab
 proc            /proc           proc    defaults          0       0
 /dev/mmcblk0p1  /boot           vfat    defaults          0       2
 /dev/mmcblk0p2  /               $fstype    defaults,noatime  0       1
-EOF
-
-# Define sources.list
-cat << EOF > ${work_dir}/etc/apt/sources.list
-deb ${mirror} ${suite} ${components//,/ }
-#deb-src ${mirror} ${suite} ${components//,/ }
 EOF
 
 # Copy a default config, with everything commented out so people find it when
@@ -406,11 +419,6 @@ echo "Rsyncing rootfs into image file"
 rsync -HPavz -q --exclude boot ${work_dir}/ ${basedir}/root/
 rsync -rtx -q ${work_dir}/boot ${basedir}/root
 sync
-
-# We do this down here to get rid of the build system's resolv.conf after running through the build.
-cat << EOF > "${basedir}"/root/etc/resolv.conf
-nameserver 8.8.8.8
-EOF
 
 # Make sure to enable ssh on the device by default
 touch "${basedir}"/root/boot/ssh

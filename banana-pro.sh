@@ -3,7 +3,6 @@ set -e
 
 # Uncomment to activate debug
 # debug=true
-
 if [ "$debug" = true ]; then
   exec > >(tee -a -i "${0%.*}.log") 2>&1
   set -x
@@ -12,7 +11,7 @@ fi
 # Architecture
 architecture=${architecture:-"armhf"}
 # Generate a random machine name to be used.
-machine=$(tr -cd 'A-Za-z0-9' < /dev/urandom | head -c16 ; echo)
+machine=$(dbus-uuidgen)
 # Custom hostname variable
 hostname=${2:-kali}
 # Custom image file name variable - MUST NOT include .img at the end.
@@ -28,6 +27,8 @@ bootsize="128"
 compress="xz"
 # Choose filesystem format to format ( ext3 or ext4 )
 fstype="ext3"
+# Generate a random root UUID to be used.
+root_uuid=$(cat /proc/sys/kernel/random/uuid)
 # If you have your own preferred mirrors, set them here.
 mirror=${mirror:-"http://http.kali.org/kali"}
 # Gitlab url Kali repository
@@ -80,7 +81,7 @@ base="apt-utils bash-completion console-setup dialog dkms e2fsprogs ifupdown ini
 desktop="kali-desktop-xfce kali-root-login xserver-xorg-video-fbdev xfonts-terminus xinput"
 tools="kali-linux-default"
 services="apache2 atftpd"
-extras="alsa-utils bc bison bluez bluez-firmware kali-linux-core libnss-systemd libssl-dev triggerhappy"
+extras="alsa-utils bc bison crda bluez bluez-firmware kali-linux-core libnss-systemd libssl-dev triggerhappy"
 
 packages="${arm} ${base} ${services}"
 
@@ -100,16 +101,17 @@ elif [ "$apt_cacher" = "apt-cacher-ng" ] ; then
 fi
 
 # Detect architecture
-if [[ "${architecture}" == "arm64" ]]; then
-        qemu_bin="/usr/bin/qemu-aarch64-static"
-        lib_arch="aarch64-linux-gnu"
-elif [[ "${architecture}" == "armhf" ]]; then
-        qemu_bin="/usr/bin/qemu-arm-static"
-        lib_arch="arm-linux-gnueabihf"
-elif [[ "${architecture}" == "armel" ]]; then
-        qemu_bin="/usr/bin/qemu-arm-static"
-        lib_arch="arm-linux-gnueabi"
-fi
+case ${architecture} in
+  arm64)
+    qemu_bin="/usr/bin/qemu-aarch64-static"
+    lib_arch="aarch64-linux-gnu" ;;
+  armhf)
+    qemu_bin="/usr/bin/qemu-arm-static"
+    lib_arch="arm-linux-gnueabihf" ;;
+  armel)
+    qemu_bin="/usr/bin/qemu-arm-static"
+    lib_arch="arm-linux-gnueabi" ;;
+esac
 
 # create the rootfs - not much to modify here, except maybe throw in some more packages if you want.
 eatmydata debootstrap --foreign --keyring=/usr/share/keyrings/kali-archive-keyring.gpg --include=kali-archive-keyring,eatmydata \
@@ -117,7 +119,7 @@ eatmydata debootstrap --foreign --keyring=/usr/share/keyrings/kali-archive-keyri
 
 # systemd-nspawn enviroment
 systemd-nspawn_exec(){
-  LANG=C systemd-nspawn -q --bind-ro ${qemu_bin} -M ${machine} -D ${work_dir} "$@"
+  LANG=C systemd-nspawn -q --bind-ro ${qemu_bin} --capability=cap_setfcap -E RUNLEVEL=1 -M ${machine} -D ${work_dir} "$@"
 }
 
 # We need to manually extract eatmydata to use it for the second stage.
@@ -158,7 +160,8 @@ echo "${hostname}" > ${work_dir}/etc/hostname
 
 # So X doesn't complain, we add kali to hosts
 cat << EOF > ${work_dir}/etc/hosts
-127.0.0.1       ${hostname}    localhost
+127.0.1.1       ${hostname}
+127.0.0.1       localhost
 ::1             localhost ip6-localhost ip6-loopback
 fe00::0         ip6-localnet
 ff00::0         ip6-mcastprefix
@@ -180,9 +183,6 @@ auto eth0
 allow-hotplug eth0
 iface eth0 inet dhcp
 EOF
-
-# DNS server
-echo "nameserver 8.8.8.8" > ${work_dir}/etc/resolv.conf
 
 # Copy directory bsp into build dir.
 cp -rp bsp ${work_dir}
@@ -268,21 +268,27 @@ echo "T1:12345:respawn:/sbin/agetty -L ttyS0 115200 vt100" >> /etc/inittab
 # Fix startup time from 5 minutes to 25 secs on raising interfaces
 sed -i 's/^TimeoutStartSec=5min/TimeoutStartSec=25/g' "/usr/lib/systemd/system/networking.service"
 
-# We replace the u-boot menu defaults here so we can make sure the build system doesn't poison it.
-# We use _EOF_ so that the third-stage script doesn't end prematurely.
-cat << '_EOF_' > /etc/default/u-boot
-U_BOOT_PARAMETERS="console=ttyS0,115200 console=tty1 root=/dev/mmcblk0p1 rootwait panic=10 rw rootfstype=$fstype net.ifnames=0"
-_EOF_
+# Create an fstab so that we don't mount / read-only.
+echo "UUID=$root_uuid /               $fstype    errors=remount-ro 0       1" >> /etc/fstab
 
+# u-boot config
+cat > /etc/default/u-boot <<EOM
+U_BOOT_ROOT="root=UUID=$root_uuid"
+U_BOOT_PARAMETERS="console=ttyS0,115200 console=tty1 consoleblank=0 panic=10 rw rootfstype=$fstype net.ifnames=0 quiet rootwait"
+U_BOOT_MENU_LABEL="Kali Linux"
+EOM
+
+# And now that we've changed the defaults, run u-boot-update to generate the extlinux.conf
+u-boot-update
+
+# Clean up dpkg.eatmydata
 rm -f /usr/bin/dpkg
+dpkg-divert --remove --rename /usr/bin/dpkg
 EOF
 
 # Run third stage
 chmod 755 ${work_dir}/third-stage
 systemd-nspawn_exec /third-stage
-
-# Clean up eatmydata
-systemd-nspawn_exec dpkg-divert --remove --rename /usr/bin/dpkg
 
 # Clean system
 systemd-nspawn_exec << 'EOF'
@@ -292,6 +298,7 @@ fc-cache -frs
 rm -rf /tmp/*
 rm -rf /etc/*-
 rm -rf /hs_err*
+rm -rf /third-stage
 rm -rf /userland
 rm -rf /opt/vc/src
 rm -f /etc/ssh/ssh_host_*
@@ -303,6 +310,9 @@ rm -rf /var/cache/debconf/*.data-old
 for logs in $(find /var/log -type f); do > $logs; done
 history -c
 EOF
+
+# Define DNS server after last running systemd-nspawn.
+echo "nameserver 8.8.8.8" > ${work_dir}/etc/resolv.conf
 
 # Disable the use of http proxy in case it is enabled.
 if [ -n "$proxy_url" ]; then
@@ -322,11 +332,6 @@ deb ${mirror} ${suite} ${components//,/ }
 #deb-src ${mirror} ${suite} ${components//,/ }
 EOF
 
-# Build system will insert it's root filesystem into the extlinux.conf file so
-# we sed it out, this only affects build time, not upgrading the kernel on the
-# device itself.
-sed -i -e 's/append.*/append console=ttyS0,115200 console=tty1 root=\/dev\/mmcblk0p1 rootwait panic=10 rw rootfstype=$fstype net.ifnames=0/g' ${work_dir}/boot/extlinux/extlinux.conf
-
 # Calculate the space to create the image.
 root_size=$(du -s -B1 ${work_dir} --exclude=${work_dir}/boot | cut -f1)
 root_extra=$((${root_size}/1024/1000*5*1024/5))
@@ -339,31 +344,19 @@ parted -s ${current_dir}/${imagename}.img mklabel msdos
 parted -s -a minimal ${current_dir}/${imagename}.img mkpart primary $fstype 1MiB 100%
 
 # Set the partition variables
-loopdevice=`losetup -f --show ${current_dir}/${imagename}.img`
-device=`kpartx -va ${loopdevice} | sed 's/.*\(loop[0-9]\+\)p.*/\1/g' | head -1`
-sleep 5
-device="/dev/mapper/${device}"
-rootp=${device}p1
+loopdevice=$(losetup --show -fP "${current_dir}/${imagename}.img")
+rootp="${loopdevice}p1"
 
 if [[ $fstype == ext4 ]]; then
   features="-O ^64bit,^metadata_csum"
 elif [[ $fstype == ext3 ]]; then
   features="-O ^64bit"
 fi
-mkfs $features -t $fstype -L ROOTFS ${rootp}
+mkfs -U $root_uuid $features -t $fstype -L ROOTFS ${rootp}
 
 # Create the dirs for the partitions and mount them
 mkdir -p "${basedir}"/root
 mount ${rootp} "${basedir}"/root
-
-# We do this down here to get rid of the build system's resolv.conf after running through the build.
-cat << EOF > ${work_dir}/etc/resolv.conf
-nameserver 8.8.8.8
-EOF
-
-# Create an fstab so that we don't mount / read-only.
-UUID=$(blkid -s UUID -o value ${rootp})
-echo "UUID=$UUID /               $fstype    errors=remount-ro 0       1" >> ${work_dir}/etc/fstab
 
 echo "Rsyncing rootfs to image file"
 rsync -HPavz -q ${work_dir}/ ${basedir}/root/
@@ -371,10 +364,13 @@ rsync -HPavz -q ${work_dir}/ ${basedir}/root/
 # Unmount partitions
 sync
 umount ${rootp}
-kpartx -dv ${loopdevice}
 
 dd if=${work_dir}/usr/lib/u-boot/Bananapro/u-boot-sunxi-with-spl.bin of=${loopdevice} bs=1024 seek=8
 
+# Check filesystem
+e2fsck -y -f "$rootp"
+
+# Remove loop devices
 losetup -d ${loopdevice}
 
 # Limite use cpu function
@@ -397,6 +393,7 @@ limit_cpu (){
       fi
     }
   done
+  cgdelete -g cpu:/cpulimit-"$rand"
 }
 
 if [ $compress = xz ]; then

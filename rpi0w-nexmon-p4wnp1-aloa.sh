@@ -1,10 +1,6 @@
 #!/bin/bash
-set -e
-
-######
 # This is a work in progress script for P4wnP1 A.L.O.A. based on @binkybear's built script for P4wnP1
-#
-##########
+set -e
 
 # Doesn't currently work, so lets just exit.
 echo "This script is currently in need of work, porting to the new URLs, as well as the new setup."
@@ -12,7 +8,6 @@ exit 1
 
 # Uncomment to activate debug
 # debug=true
-
 if [ "$debug" = true ]; then
   exec > >(tee -a -i "${0%.*}.log") 2>&1
   set -x
@@ -21,7 +16,7 @@ fi
 # Architecture
 architecture=${architecture:-"armel"}
 # Generate a random machine name to be used.
-machine=$(tr -cd 'A-Za-z0-9' < /dev/urandom | head -c16 ; echo)
+machine=$(dbus-uuidgen)
 # Custom hostname variable
 hostname=${2:-kali}
 # Custom image file name variable - MUST NOT include .img at the end.
@@ -100,13 +95,6 @@ extras="autossh avahi-daemon bash-completion bluez bluez-firmware dhcpcd5 dnsmas
 
 packages="${arm} ${base} ${services} ${extras}"
 
-# Check to ensure that the architecture is set to ARMEL since the RPi is the
-# only board that is armel.
-if [[ ${architecture} != "armel" ]] ; then
-    echo "The Raspberry Pi cannot run Debian armhf binaries"
-    exit 0
-fi
-
 # Automatic configuration to use an http proxy, such as apt-cacher-ng.
 # You can turn off automatic settings by uncommenting apt_cacher=off.
 # apt_cacher=off
@@ -122,14 +110,26 @@ elif [ "$apt_cacher" = "apt-cacher-ng" ] ; then
   fi
 fi
 
+# Detect architecture
+case ${architecture} in
+  arm64)
+    qemu_bin="/usr/bin/qemu-aarch64-static"
+    lib_arch="aarch64-linux-gnu" ;;
+  armhf)
+    qemu_bin="/usr/bin/qemu-arm-static"
+    lib_arch="arm-linux-gnueabihf" ;;
+  armel)
+    qemu_bin="/usr/bin/qemu-arm-static"
+    lib_arch="arm-linux-gnueabi" ;;
+esac
+
 # create the rootfs - not much to modify here, except maybe throw in some more packages if you want.
 debootstrap --foreign --keyring=/usr/share/keyrings/kali-archive-keyring.gpg --include=kali-archive-keyring \
   --components=${components} --include=${arm// /,} --arch ${architecture} ${suite} ${work_dir} http://http.kali.org/kali
 
 # systemd-nspawn enviroment
 systemd-nspawn_exec(){
-  qemu_bin=/usr/bin/qemu-aarch64-static
-  LANG=C systemd-nspawn -q --bind-ro ${qemu_bin} -M ${machine} -D ${work_dir} "$@"
+  LANG=C systemd-nspawn -q --bind-ro ${qemu_bin} --capability=cap_setfcap --setenv=RUNLEVEL=1 -M ${machine} -D ${work_dir} "$@"
 }
 
 # debootstrap second stage
@@ -168,9 +168,6 @@ allow-hotplug eth0
 iface eth0 inet dhcp
 EOF
 
-# DNS server
-echo "nameserver 8.8.8.8" > ${work_dir}/etc/resolv.conf
-
 # Copy directory bsp into build dir.
 cp -rp bsp ${work_dir}
 
@@ -180,7 +177,6 @@ export MALLOC_CHECK_=0 # workaround for LP: #520465
 if [ -n "$proxy_url" ]; then
   echo "Acquire::http { Proxy \"$proxy_url\" };" > ${work_dir}/etc/apt/apt.conf.d/66proxy
 fi
-
 
 # Copy a default config, with everything commented out so people find it when
 # they go to add something when they are following instructions on a website.
@@ -192,10 +188,10 @@ git clone  -b 'v0.1.0-alpha2' --single-branch --depth 1  https://github.com/mame
 cat << EOF > kali-${architecture}/third-stage
 #!/bin/bash
 set -e
-dpkg-divert --add --local --divert /usr/sbin/invoke-rc.d.chroot --rename /usr/sbin/invoke-rc.d
-cp /bin/true /usr/sbin/invoke-rc.d
-echo -e "#!/bin/sh\nexit 101" > /usr/sbin/policy-rc.d
-chmod 755 /usr/sbin/policy-rc.d
+# dpkg-divert --add --local --divert /usr/sbin/invoke-rc.d.chroot --rename /usr/sbin/invoke-rc.d
+# cp /bin/true /usr/sbin/invoke-rc.d
+# echo -e "#!/bin/sh\nexit 101" > /usr/sbin/policy-rc.d
+# chmod 755 /usr/sbin/policy-rc.d
 
 apt-get update
 apt-get --yes --allow-change-held-packages install locales-all
@@ -324,6 +320,7 @@ fc-cache -frs
 rm -rf /tmp/*
 rm -rf /etc/*-
 rm -rf /hs_err*
+rm -rf /third-stage
 rm -rf /userland
 rm -rf /opt/vc/src
 rm -f /etc/ssh/ssh_host_*
@@ -335,6 +332,9 @@ rm -rf /var/cache/debconf/*.data-old
 for logs in $(find /var/log -type f); do > $logs; done
 history -c
 EOF
+
+# Define DNS server after last running systemd-nspawn.
+echo "nameserver 8.8.8.8" > ${work_dir}/etc/resolv.conf
 
 # Disable the use of http proxy in case it is enabled.
 if [ -n "$proxy_url" ]; then
@@ -348,20 +348,14 @@ if [[ ! -z "${4}" || ! -z "${5}" ]]; then
   suite=${5}
 fi
 
-chmod 755 kali-${architecture}/cleanup
-LANG=C systemd-nspawn -M ${machine} -D kali-${architecture} /cleanup
-
-# Enable login over serial
-echo "T0:23:respawn:/sbin/agetty -L ttyAMA0 115200 vt100" >> ${work_dir}/etc/inittab
-
 # Define sources.list
 cat << EOF > ${work_dir}/etc/apt/sources.list
 deb ${mirror} ${suite} ${components//,/ }
 #deb-src ${mirror} ${suite} ${components//,/ }
 EOF
 
-# Uncomment this if you use apt-cacher-ng otherwise git clones will fail.
-#unset http_proxy
+# Enable login over serial
+echo "T0:23:respawn:/sbin/agetty -L ttyAMA0 115200 vt100" >> ${work_dir}/etc/inittab
 
 # Kernel section. If you want to use a custom kernel, or configuration, replace
 # them in this section.
@@ -532,11 +526,6 @@ mkdir -p ${basedir}/root/
 mount ${rootp} ${basedir}/root
 mkdir -p ${basedir}/root/boot
 mount ${bootp} ${basedir}/root/boot
-
-# We do this down here to get rid of the build system's resolv.conf after running through the build.
-cat << EOF > kali-${architecture}/etc/resolv.conf
-nameserver 8.8.8.8
-EOF
 
 # Because of the p4wnp1 script, we set the hostname down here, instead of using the machine name.
 # Set hostname

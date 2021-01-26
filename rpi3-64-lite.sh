@@ -5,7 +5,6 @@ set -e
 
 # Uncomment to activate debug
 # debug=true
-
 if [ "$debug" = true ]; then
   exec > >(tee -a -i "${0%.*}.log") 2>&1
   set -x
@@ -14,11 +13,11 @@ fi
 # Architecture
 architecture=${architecture:-"arm64"}
 # Generate a random machine name to be used.
-machine=$(tr -cd 'A-Za-z0-9' < /dev/urandom | head -c16 ; echo)
+machine=$(dbus-uuidgen)
 # Custom hostname variable
 hostname=${2:-kali}
 # Custom image file name variable - MUST NOT include .img at the end.
-imagename=${3:-kali-linux-$1-rpi3-nexmon-64-lite}
+imagename=${3:-kali-linux-$1-rpi4-nexmon-64-lite}
 # Suite to use, valid options are:
 # kali-rolling, kali-dev, kali-bleeding-edge, kali-dev-only, kali-experimental, kali-last-snapshot
 suite=${suite:-"kali-rolling"}
@@ -60,7 +59,7 @@ fi
 # Current directory
 current_dir="$(pwd)"
 # Base directory
-basedir=${current_dir}/rpi3-nexmon-64-"$1"-lite
+basedir=${current_dir}/rpi4-nexmon-64-"$1"-lite
 # Working directory
 work_dir="${basedir}/kali-${architecture}"
 
@@ -81,7 +80,8 @@ arm="fake-hwclock ntpdate u-boot-tools"
 base="apt-transport-https apt-utils console-setup e2fsprogs firmware-linux firmware-realtek firmware-atheros firmware-libertas ifupdown initramfs-tools iw kali-defaults man-db mlocate netcat-traditional net-tools parted pciutils psmisc rfkill screen snmpd snmp sudo tftp tmux unrar usbutils vim wget zerofree"
 tools="aircrack-ng crunch cewl dnsrecon dnsutils ethtool exploitdb hydra john libnfc-bin medusa metasploit-framework mfoc ncrack nmap passing-the-hash proxychains recon-ng sqlmap tcpdump theharvester tor tshark usbutils whois windows-binaries winexe wpscan wireshark"
 services="apache2 atftpd openssh-server openvpn tightvncserver"
-extras="bluez bluez-firmware i2c-tools python3-configobj python3-pip python3-requests python3-rpi.gpio python3-smbus triggerhappy wpasupplicant"
+extras="bluez bluez-firmware crda i2c-tools python3-configobj python3-pip python3-requests python3-rpi.gpio python3-smbus triggerhappy wpasupplicant"
+
 
 packages="${arm} ${base} ${services}"
 
@@ -101,24 +101,35 @@ elif [ "$apt_cacher" = "apt-cacher-ng" ] ; then
 fi
 
 # Detect architecture
-if [[ "${architecture}" == "arm64" ]]; then
-        qemu_bin="/usr/bin/qemu-aarch64-static"
-        lib_arch="aarch64-linux-gnu"
-elif [[ "${architecture}" == "armhf" ]]; then
-        qemu_bin="/usr/bin/qemu-arm-static"
-        lib_arch="arm-linux-gnueabihf"
-elif [[ "${architecture}" == "armel" ]]; then
-        qemu_bin="/usr/bin/qemu-arm-static"
-        lib_arch="arm-linux-gnueabi"
-fi
+case ${architecture} in
+  arm64)
+    qemu_bin="/usr/bin/qemu-aarch64-static"
+    lib_arch="aarch64-linux-gnu" ;;
+  armhf)
+    qemu_bin="/usr/bin/qemu-arm-static"
+    lib_arch="arm-linux-gnueabihf" ;;
+  armel)
+    qemu_bin="/usr/bin/qemu-arm-static"
+    lib_arch="arm-linux-gnueabi" ;;
+esac
 
 # create the rootfs - not much to modify here, except maybe throw in some more packages if you want.
 eatmydata debootstrap --foreign --keyring=/usr/share/keyrings/kali-archive-keyring.gpg --include=kali-archive-keyring,eatmydata \
   --components=${components} --arch ${architecture} ${suite} ${work_dir} http://http.kali.org/kali
 
+# Check systemd-nspawn version
+nspawn_ver=$(systemd-nspawn --version | awk '{if(NR==1) print $2}')
+if [[ $nspawn_ver -ge 245 ]]; then
+  extra_args="--hostname=$hostname -q -P"
+elif [[ $nspawn_ver -ge 241 ]]; then
+  extra_args="--hostname=$hostname -q"
+else
+  extra_args="-q"
+fi
+
 # systemd-nspawn enviroment
-systemd-nspawn_exec(){
-  LANG=C systemd-nspawn -q --bind-ro ${qemu_bin} -M ${machine} -D ${work_dir} "$@"
+systemd-nspawn_exec() {
+  systemd-nspawn --bind-ro "$qemu_bin" $extra_args --capability=cap_setfcap -E RUNLEVEL=1,LANG=C -M "$machine" -D "$work_dir" "$@"
 }
 
 # We need to manually extract eatmydata to use it for the second stage.
@@ -183,9 +194,6 @@ allow-hotplug eth0
 iface eth0 inet dhcp
 EOF
 
-# DNS server
-echo "nameserver 8.8.8.8" > ${work_dir}/etc/resolv.conf
-
 # Copy directory bsp into build dir.
 cp -rp bsp ${work_dir}
 
@@ -246,7 +254,7 @@ install -m755 /bsp/scripts/monstop /usr/bin/
 
 # Install the kernel packages
 echo "deb http://http.re4son-kernel.com/re4son kali-pi main" > /etc/apt/sources.list.d/re4son.list
-wget -qO /etc/apt/trusted.gpg.d/re4son-repo-key.asc https://re4son-kernel.com/keys/http/archive-key.asc
+wget -qO /etc/apt/trusted.gpg.d/kali_pi-archive-keyring.gpg https://re4son-kernel.com/keys/http/kali_pi-archive-keyring.gpg
 eatmydata apt-get update
 eatmydata apt-get install -y \$aptops kalipi-kernel kalipi-bootloader kalipi-re4son-firmware kalipi-kernel-headers
 
@@ -274,6 +282,7 @@ install -m755 /bsp/bluetooth/rpi/btuart /usr/bin/
 systemctl enable hciuart
 
 # Enable copying of user wpa_supplicant.conf file
+install -m755 /bsp/scripts/copy-user-wpasupplicant.sh /usr/bin
 systemctl enable copy-user-wpasupplicant
 
 # Enable... enabling ssh by putting ssh or ssh.txt file in /boot
@@ -311,15 +320,14 @@ install -m644 /bsp/udev/99-vchiq-permissions.rules /etc/udev/rules.d/
 # Compile raspi userland
 cd /userland && ./buildme --aarch64
 
+# Clean up dpkg.eatmydata
 rm -f /usr/bin/dpkg
+dpkg-divert --remove --rename /usr/bin/dpkg
 EOF
 
 # Run third stage
 chmod 755 ${work_dir}/third-stage
 systemd-nspawn_exec /third-stage
-
-# Clean up eatmydata
-systemd-nspawn_exec dpkg-divert --remove --rename /usr/bin/dpkg
 
 # Clean system
 systemd-nspawn_exec << 'EOF'
@@ -329,6 +337,7 @@ fc-cache -frs
 rm -rf /tmp/*
 rm -rf /etc/*-
 rm -rf /hs_err*
+rm -rf /third-stage
 rm -rf /userland
 rm -rf /opt/vc/src
 rm -f /etc/ssh/ssh_host_*
@@ -340,6 +349,9 @@ rm -rf /var/cache/debconf/*.data-old
 for logs in $(find /var/log -type f); do > $logs; done
 history -c
 EOF
+
+# Define DNS server after last running systemd-nspawn.
+echo "nameserver 8.8.8.8" > ${work_dir}/etc/resolv.conf
 
 # Disable the use of http proxy in case it is enabled.
 if [ -n "$proxy_url" ]; then
@@ -358,9 +370,6 @@ cat << EOF > ${work_dir}/etc/apt/sources.list
 deb ${mirror} ${suite} ${components//,/ }
 #deb-src ${mirror} ${suite} ${components//,/ }
 EOF
-
-# Uncomment to enable the source code repositories
-#sed -i '/deb-src/s/^#//' $work_dir/etc/apt/sources.list
 
 # Create cmdline.txt file
 cat << EOF > ${work_dir}/boot/cmdline.txt
